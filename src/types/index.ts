@@ -8,6 +8,7 @@ export interface FridgeItem {
   expiry_date: string; // ISO date string YYYY-MM-DD
   added_at: string;
   status: ItemStatus;
+  status_changed_at: string | null;
 }
 
 export interface FridgeItemDraft {

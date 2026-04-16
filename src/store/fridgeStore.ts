@@ -65,8 +65,7 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
   },
 
   setStatus: async (id, status) => {
-    await get().updateItem(id, { status });
-    // Remove from active list
+    await get().updateItem(id, { status, status_changed_at: new Date().toISOString() });
     set(state => ({
       items: state.items.filter(item => item.id !== id),
     }));

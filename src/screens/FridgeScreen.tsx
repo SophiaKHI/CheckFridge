@@ -82,6 +82,18 @@ export default function FridgeScreen({ navigation }: any) {
         ))}
       </View>
 
+      {/* Drag targets */}
+      <View style={styles.dragTargets}>
+        <View style={styles.dragTargetLeft}>
+          <Text style={styles.dragTargetIcon}>🗑️</Text>
+          <Text style={styles.dragTargetLabel}>Toss</Text>
+        </View>
+        <View style={styles.dragTargetRight}>
+          <Text style={styles.dragTargetLabel}>Used</Text>
+          <Text style={styles.dragTargetIcon}>✅</Text>
+        </View>
+      </View>
+
       {/* Bubble canvas */}
       <View style={styles.canvas}>
         {activeItems.length === 0 ? (
@@ -109,8 +121,6 @@ export default function FridgeScreen({ navigation }: any) {
         )}
       </View>
 
-      <Text style={styles.hint}>Swipe right → used · Swipe left → toss</Text>
-
       {/* Actions */}
       <View style={styles.actions}>
         <TouchableOpacity
@@ -121,9 +131,9 @@ export default function FridgeScreen({ navigation }: any) {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.actionBtn, styles.actionBtnSecondary]}
-          onPress={() => navigation.navigate('Recipes')}
+          onPress={() => navigation.navigate('ScanFridge')}
         >
-          <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>Recipe ideas ↗</Text>
+          <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>Scan fridge</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -131,7 +141,7 @@ export default function FridgeScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 16 },
+  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 28 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   title: { fontSize: 22, fontWeight: '600', color: '#111' },
   badge: { backgroundColor: '#FEF3C7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
@@ -153,7 +163,24 @@ const styles = StyleSheet.create({
   bubbleName: { fontSize: 9, fontWeight: '500', textAlign: 'center', maxWidth: '90%' },
   bubbleDays: { fontSize: 8, opacity: 0.85 },
   emptyText: { textAlign: 'center', marginTop: 120, color: '#aaa', fontSize: 15, lineHeight: 24 },
-  hint: { fontSize: 11, color: '#bbb', textAlign: 'center', marginTop: 8, marginBottom: 12 },
+  dragTargets: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 8,
+  },
+  dragTargetLeft: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFF4F4', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderWidth: 1, borderColor: '#F7C1C1',
+  },
+  dragTargetRight: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F0FDF9', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderWidth: 1, borderColor: '#9FE1CB',
+  },
+  dragTargetIcon: { fontSize: 18 },
+  dragTargetLabel: { fontSize: 12, fontWeight: '500', color: '#888' },
   actions: { flexDirection: 'row', gap: 10 },
   actionBtn: {
     flex: 1, backgroundColor: '#1D9E75', borderRadius: 12,
