@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/authStore';
 import LoginScreen from '../screens/LoginScreen';
 import FridgeScreen from '../screens/FridgeScreen';
 import RecipesScreen from '../screens/RecipesScreen';
+import HistoryScreen from '../screens/HistoryScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AddItemScreen from '../screens/AddItemScreen';
 import ScanFridgeScreen from '../screens/ScanFridgeScreen';
@@ -39,17 +40,22 @@ function AppTabs() {
       <Tab.Screen
         name="Fridge"
         component={FridgeStack}
-        options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🧊</Text> }}
+        options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>🧊</Text> }}
       />
       <Tab.Screen
         name="Recipes"
         component={RecipesScreen}
-        options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🍳</Text>, headerShown: true }}
+        options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>🍳</Text>, headerShown: true }}
+      />
+      <Tab.Screen
+        name="History"
+        component={HistoryScreen}
+        options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>📋</Text>, headerShown: true, title: 'History' }}
       />
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>⚙️</Text>, headerShown: true }}
+        options={{ tabBarIcon: () => <Text style={{ fontSize: 20 }}>⚙️</Text>, headerShown: true }}
       />
     </Tab.Navigator>
   );
@@ -68,7 +74,12 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      {session ? <AppTabs /> : <Stack.Navigator screenOptions={{ headerShown: false }}><Stack.Screen name="Login" component={LoginScreen} /></Stack.Navigator>}
+      {session
+        ? <AppTabs />
+        : <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Login" component={LoginScreen} />
+          </Stack.Navigator>
+      }
     </NavigationContainer>
   );
 }

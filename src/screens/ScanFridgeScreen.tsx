@@ -29,7 +29,7 @@ export default function ScanFridgeScreen({ navigation }: any) {
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
   const [adding, setAdding] = useState(false);
   const cameraRef = useRef<CameraView>(null);
-  const { addItem } = useFridgeStore();
+  const { addItem, fetchItems } = useFridgeStore();
 
   const takePicture = async () => {
     if (!cameraRef.current) return;
@@ -111,6 +111,7 @@ Rules:
         expiry_date: format(addDays(new Date(), item.expiryDays), 'yyyy-MM-dd'),
       });
     }
+    await fetchItems(); // sync store before navigating back
     setAdding(false);
     navigation.goBack();
   };
