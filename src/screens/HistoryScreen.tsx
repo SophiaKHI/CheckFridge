@@ -4,11 +4,15 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
+import { useFridgeStore } from '../store/fridgeStore';
+import { FridgeItem } from '../types';
 
 interface HistoryEntry {
   name: string;
   icon: string;
   count: number;
+  /** One item to restore — the most recently added in this group */
+  restoreCandidate: FridgeItem;
 }
 
 type Status = 'used' | 'trashed';
@@ -16,15 +20,19 @@ type Status = 'used' | 'trashed';
 async function loadHistory(status: Status): Promise<HistoryEntry[]> {
   const { data, error } = await supabase
     .from('fridge_items')
-    .select('name, icon')
-    .eq('status', status);
+    .select('*')
+    .eq('status', status)
+    .order('added_at', { ascending: false });
 
   if (error || !data) return [];
 
   const grouped: Record<string, HistoryEntry> = {};
-  for (const item of data) {
+  for (const item of data as FridgeItem[]) {
     const key = item.name.toLowerCase().trim();
-    if (!grouped[key]) grouped[key] = { name: item.name, icon: item.icon, count: 0 };
+    if (!grouped[key]) {
+      // First item encountered is the most recently added (desc order above)
+      grouped[key] = { name: item.name, icon: item.icon, count: 0, restoreCandidate: item };
+    }
     grouped[key].count++;
   }
   return Object.values(grouped).sort((a, b) => b.count - a.count);
@@ -34,12 +42,23 @@ export default function HistoryScreen({ route }: any) {
   const [tab, setTab] = useState<Status>('used');
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const { restoreItem } = useFridgeStore();
 
   const fetch = useCallback(async (status: Status) => {
     setLoading(true);
     setEntries(await loadHistory(status));
     setLoading(false);
   }, []);
+
+  const handleRestore = useCallback(async (entry: HistoryEntry) => {
+    const id = entry.restoreCandidate.id;
+    setRestoringId(id);
+    await restoreItem(entry.restoreCandidate);
+    // Re-fetch so the count decrements (or row disappears if count was 1)
+    setEntries(await loadHistory(tab));
+    setRestoringId(null);
+  }, [restoreItem, tab]);
 
   // On focus: honour initialStatus param from navigation (e.g. tapping a drop zone badge),
   // otherwise reload the current tab
@@ -103,16 +122,26 @@ export default function HistoryScreen({ route }: any) {
           data={entries}
           keyExtractor={(_, i) => String(i)}
           contentContainerStyle={{ paddingBottom: 40 }}
-          renderItem={({ item, index }) => (
-            <View style={styles.row}>
-              <Text style={styles.rank}>#{index + 1}</Text>
-              <Text style={styles.rowIcon}>{item.icon}</Text>
-              <Text style={styles.rowName}>{item.name}</Text>
-              <View style={[styles.countBadge, { backgroundColor: isTrash ? '#FDECEA' : '#F0FDF9' }]}>
-                <Text style={[styles.countText, { color: accent }]}>{item.count}×</Text>
+          renderItem={({ item, index }) => {
+            const isRestoring = restoringId === item.restoreCandidate.id;
+            return (
+              <View style={styles.row}>
+                <Text style={styles.rank}>#{index + 1}</Text>
+                <Text style={styles.rowIcon}>{item.icon}</Text>
+                <Text style={styles.rowName}>{item.name}</Text>
+                <View style={[styles.countBadge, { backgroundColor: isTrash ? '#FDECEA' : '#F0FDF9' }]}>
+                  <Text style={[styles.countText, { color: accent }]}>{item.count}×</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.restoreBtn, isRestoring && styles.restoreBtnDisabled]}
+                  onPress={() => handleRestore(item)}
+                  disabled={isRestoring}
+                >
+                  <Text style={styles.restoreBtnText}>{isRestoring ? '…' : 'Restore'}</Text>
+                </TouchableOpacity>
               </View>
-            </View>
-          )}
+            );
+          }}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       )}
@@ -152,4 +181,11 @@ const styles = StyleSheet.create({
   countBadge: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
   countText: { fontSize: 13, fontWeight: '600' },
   separator: { height: 0.5, backgroundColor: '#f0f0f0', marginLeft: 94 },
+  restoreBtn: {
+    backgroundColor: '#f0fdf9', borderRadius: 8,
+    borderWidth: 1, borderColor: '#1D9E75',
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  restoreBtnDisabled: { opacity: 0.45 },
+  restoreBtnText: { fontSize: 12, color: '#1D9E75', fontWeight: '600' },
 });

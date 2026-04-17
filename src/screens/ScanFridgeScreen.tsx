@@ -44,41 +44,47 @@ export default function ScanFridgeScreen({ navigation }: any) {
         throw new Error('Add your Gemini API key to .env as EXPO_PUBLIC_GEMINI_API_KEY');
       }
 
-      console.log('[ScanFridge] apiKey:', apiKey);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      const body = JSON.stringify({
-        contents: [{
-          parts: [
-            { inline_data: { mime_type: 'image/jpeg', data: photo.base64 } },
-            { text: `Analyze this fridge photo. List every visible food item.
+      const MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash-001'];
+      const prompt = `Analyze this fridge photo. List every visible food item.
 Return ONLY a raw JSON array — no markdown, no code fences, just JSON — like:
 [{"name":"Milk","icon":"🥛","daysUntilExpiry":5},{"name":"Eggs","icon":"🥚","daysUntilExpiry":14}]
 Rules:
 - Use a single relevant food emoji for icon
 - Be conservative with expiry (err on the side of shorter)
 - Only include items you can clearly identify
-- If the fridge is empty or no food is visible, return []` },
-          ],
-        }],
-      });
+- If the fridge is empty or no food is visible, return []`;
 
-      // Retry with exponential backoff on 429 (rate limit)
+      // Try each model in order; retry up to 3 times with 5s waits on 429/503
       let response: Response | null = null;
-      for (let attempt = 0; attempt < 4; attempt++) {
-        if (attempt > 0) {
-          await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1))); // 1.5s, 3s, 6s
+      let responseBody = '';
+      let lastError = '';
+      outer: for (const model of MODELS) {
+        const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`;
+        const body = JSON.stringify({
+          contents: [{ parts: [
+            { inline_data: { mime_type: 'image/jpeg', data: photo.base64 } },
+            { text: prompt },
+          ]}],
+        });
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise(r => setTimeout(r, 5000));
+          console.log(`[ScanFridge] trying ${model} attempt ${attempt + 1} (url: ${url})`);
+          response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+          responseBody = await response.text();
+          console.log(`[ScanFridge] ${model} attempt ${attempt + 1} → HTTP ${response.status}:`, responseBody);
+          const retryable = response.status === 429 || response.status === 503;
+          if (!retryable) break outer;
+          lastError = `${model} HTTP ${response.status}`;
         }
-        response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-        if (response.status !== 429) break;
-        console.log(`[ScanFridge] 429 rate limit, retrying (attempt ${attempt + 1})…`);
+        console.log(`[ScanFridge] ${model} exhausted, trying next model`);
       }
 
       if (!response!.ok) {
-        const err = await response!.json();
-        throw new Error(err.error?.message ?? `Gemini error ${response!.status}`);
+        const err = JSON.parse(responseBody || '{}');
+        throw new Error(err.error?.message ?? lastError ?? `Gemini error ${response!.status}`);
       }
 
-      const data = await response!.json();
+      const data = JSON.parse(responseBody);
       const raw = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim()
         .replace(/^```json?\n?/, '')
         .replace(/\n?```$/, '');

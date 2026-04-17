@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Dimensions, Animated, PanResponder,
@@ -82,8 +82,10 @@ function Bubble({
 
 // ─── FridgeScreen ─────────────────────────────────────────────────────────────
 
+type UndoToast = { item: FridgeItem; action: 'used' | 'trashed' } | null;
+
 export default function FridgeScreen({ navigation }: any) {
-  const { items, fetchItems, setStatus } = useFridgeStore();
+  const { items, fetchItems, setStatus, restoreItem } = useFridgeStore();
 
   // Re-fetch on focus — fixes post-scan and post-add-item refresh
   useFocusEffect(useCallback(() => { fetchItems(); }, []));
@@ -109,6 +111,48 @@ export default function FridgeScreen({ navigation }: any) {
     trashAnim.setValue(0);
     usedAnim.setValue(0);
   };
+
+  // Undo toast
+  const [undoToast, setUndoToast] = useState<UndoToast>(null);
+  const toastAnim    = useRef(new Animated.Value(0)).current;
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const dismissToast = useCallback(() => {
+    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+      setUndoToast(null);
+    });
+  }, [toastAnim]);
+
+  const showUndoToast = useCallback((item: FridgeItem, action: 'used' | 'trashed') => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoToast({ item, action });
+    Animated.spring(toastAnim, { toValue: 1, useNativeDriver: true }).start();
+    undoTimerRef.current = setTimeout(dismissToast, 5000);
+  }, [toastAnim, dismissToast]);
+
+  const handleUndo = useCallback(() => {
+    if (!undoToast) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    restoreItem(undoToast.item);
+    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+      setUndoToast(null);
+    });
+  }, [undoToast, toastAnim, restoreItem]);
+
+  // Capture full item before setStatus removes it from state
+  const handleUsed = useCallback((id: string) => {
+    const item = items.find(i => i.id === id);
+    setStatus(id, 'used');
+    if (item) showUndoToast(item, 'used');
+  }, [items, setStatus, showUndoToast]);
+
+  const handleTrashed = useCallback((id: string) => {
+    const item = items.find(i => i.id === id);
+    setStatus(id, 'trashed');
+    if (item) showUndoToast(item, 'trashed');
+  }, [items, setStatus, showUndoToast]);
+
+  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
 
   const trashBg    = trashAnim.interpolate({ inputRange: [0, 1], outputRange: ['#FFF0F0', '#FFBDBD'] });
   const trashScale = trashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
@@ -160,8 +204,8 @@ export default function FridgeScreen({ navigation }: any) {
               <View key={item.id} style={{ position: 'absolute', left: x, top: y }}>
                 <Bubble
                   item={item}
-                  onUsed={(id) => setStatus(id, 'used')}
-                  onTrashed={(id) => setStatus(id, 'trashed')}
+                  onUsed={handleUsed}
+                  onTrashed={handleTrashed}
                   trashZone={trashZone}
                   usedZone={usedZone}
                   onDragMove={handleDragMove}
@@ -236,6 +280,26 @@ export default function FridgeScreen({ navigation }: any) {
           <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>Scan fridge</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Undo toast */}
+      {undoToast && (
+        <Animated.View
+          style={[
+            styles.toast,
+            {
+              opacity: toastAnim,
+              transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+            },
+          ]}
+        >
+          <Text style={styles.toastText}>
+            {undoToast.action === 'used' ? 'Marked as used ✅' : 'Thrown away 🗑️'}
+          </Text>
+          <TouchableOpacity onPress={handleUndo} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.toastUndo}>UNDO</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -286,4 +350,14 @@ const styles = StyleSheet.create({
   actionBtnSecondary: { backgroundColor: '#f0fdf9', borderWidth: 1, borderColor: '#1D9E75' },
   actionBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   actionBtnTextSecondary: { color: '#1D9E75' },
+  toast: {
+    position: 'absolute', bottom: 90, left: 16, right: 16,
+    backgroundColor: '#222', borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, paddingHorizontal: 16, gap: 12,
+    shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  toastText: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '500' },
+  toastUndo: { color: '#4ADE80', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
 });

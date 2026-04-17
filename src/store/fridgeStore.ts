@@ -13,6 +13,7 @@ interface FridgeState {
   addItem: (draft: FridgeItemDraft) => Promise<void>;
   updateItem: (id: string, updates: Partial<FridgeItem>) => Promise<void>;
   setStatus: (id: string, status: ItemStatus) => Promise<void>;
+  restoreItem: (item: FridgeItem) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
 }
 
@@ -33,7 +34,6 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
     if (error) {
       set({ error: error.message, loading: false });
     } else {
-      // Never re-add items that are in the middle of being removed
       const { removing } = get();
       set({
         items: (data ?? []).filter(item => !removing.has(item.id)),
@@ -77,15 +77,18 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
   },
 
   setStatus: async (id, status) => {
-    // 1. Remove from UI immediately — don't wait for the network
+    // 1. Optimistic remove — happens instantly so the bubble vanishes immediately
     set(state => ({
       items: state.items.filter(item => item.id !== id),
       removing: new Set([...state.removing, id]),
     }));
 
-    // 2. Write only `status` to Supabase — status_changed_at requires a
-    //    migration (ALTER TABLE) that may not have run yet; omitting it keeps
-    //    the update safe until the column exists in the DB.
+    // 2. Short delay before the DB write — gives UNDO a clean cancellation window.
+    //    restoreItem() removes the id from `removing`, so the check below aborts.
+    await new Promise(r => setTimeout(r, 600));
+    if (!get().removing.has(id)) return; // UNDO was called — skip the write
+
+    // 3. Write to Supabase (only `status` — status_changed_at needs a migration first)
     const { error } = await supabase
       .from('fridge_items')
       .update({ status })
@@ -95,12 +98,40 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       console.error('[FridgeStore] setStatus error:', error.message);
     }
 
-    // 3. Release the removing lock regardless of success/failure
+    // 4. Release lock
     set(state => {
       const removing = new Set(state.removing);
       removing.delete(id);
       return { removing };
     });
+  },
+
+  restoreItem: async (item: FridgeItem) => {
+    // Remove from `removing` first — this cancels any pending setStatus DB write
+    set(state => {
+      const removing = new Set(state.removing);
+      removing.delete(item.id);
+      return { removing };
+    });
+
+    // Update DB back to active (handles the case where 600ms already passed)
+    const { error } = await supabase
+      .from('fridge_items')
+      .update({ status: 'active' })
+      .eq('id', item.id);
+
+    if (error) {
+      console.error('[FridgeStore] restoreItem error:', error.message);
+      return;
+    }
+
+    // Re-insert into local state, sorted by expiry_date
+    const restored: FridgeItem = { ...item, status: 'active' };
+    set(state => ({
+      items: [...state.items, restored].sort((a, b) =>
+        a.expiry_date.localeCompare(b.expiry_date)
+      ),
+    }));
   },
 
   deleteItem: async (id) => {
