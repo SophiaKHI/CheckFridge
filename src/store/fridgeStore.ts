@@ -6,6 +6,8 @@ interface FridgeState {
   items: FridgeItem[];
   loading: boolean;
   error: string | null;
+  /** IDs currently being removed — excluded from fetchItems to prevent race-condition reappearance */
+  removing: Set<string>;
 
   fetchItems: () => Promise<void>;
   addItem: (draft: FridgeItemDraft) => Promise<void>;
@@ -18,6 +20,7 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
   items: [],
   loading: false,
   error: null,
+  removing: new Set(),
 
   fetchItems: async () => {
     set({ loading: true, error: null });
@@ -30,7 +33,12 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
     if (error) {
       set({ error: error.message, loading: false });
     } else {
-      set({ items: data ?? [], loading: false });
+      // Never re-add items that are in the middle of being removed
+      const { removing } = get();
+      set({
+        items: (data ?? []).filter(item => !removing.has(item.id)),
+        loading: false,
+      });
     }
   },
 
@@ -44,7 +52,9 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       .select()
       .single();
 
-    if (!error && data) {
+    if (error) {
+      console.error('[FridgeStore] addItem error:', error.message);
+    } else if (data) {
       set(state => ({ items: [...state.items, data] }));
     }
   },
@@ -57,7 +67,9 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       .select()
       .single();
 
-    if (!error && data) {
+    if (error) {
+      console.error('[FridgeStore] updateItem error:', error.message);
+    } else if (data) {
       set(state => ({
         items: state.items.map(item => item.id === id ? data : item),
       }));
@@ -65,10 +77,30 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
   },
 
   setStatus: async (id, status) => {
-    await get().updateItem(id, { status, status_changed_at: new Date().toISOString() });
+    // 1. Remove from UI immediately — don't wait for the network
     set(state => ({
       items: state.items.filter(item => item.id !== id),
+      removing: new Set([...state.removing, id]),
     }));
+
+    // 2. Write only `status` to Supabase — status_changed_at requires a
+    //    migration (ALTER TABLE) that may not have run yet; omitting it keeps
+    //    the update safe until the column exists in the DB.
+    const { error } = await supabase
+      .from('fridge_items')
+      .update({ status })
+      .eq('id', id);
+
+    if (error) {
+      console.error('[FridgeStore] setStatus error:', error.message);
+    }
+
+    // 3. Release the removing lock regardless of success/failure
+    set(state => {
+      const removing = new Set(state.removing);
+      removing.delete(id);
+      return { removing };
+    });
   },
 
   deleteItem: async (id) => {
