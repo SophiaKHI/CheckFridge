@@ -179,7 +179,7 @@ export default function FridgeScreen({ navigation }: any) {
         <TouchableOpacity
           style={{ flex: 1 }}
           activeOpacity={0.8}
-          onPress={() => navigation.navigate('History')}
+          onPress={() => navigation.navigate('History', { initialStatus: 'trashed' })}
         >
           <View
             ref={trashRef}
@@ -203,7 +203,7 @@ export default function FridgeScreen({ navigation }: any) {
         <TouchableOpacity
           style={{ flex: 1 }}
           activeOpacity={0.8}
-          onPress={() => navigation.navigate('History')}
+          onPress={() => navigation.navigate('History', { initialStatus: 'used' })}
         >
           <View
             ref={usedRef}

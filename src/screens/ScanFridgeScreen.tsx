@@ -45,16 +45,12 @@ export default function ScanFridgeScreen({ navigation }: any) {
       }
 
       console.log('[ScanFridge] apiKey:', apiKey);
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: 'image/jpeg', data: photo.base64 } },
-                { text: `Analyze this fridge photo. List every visible food item.
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const body = JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: 'image/jpeg', data: photo.base64 } },
+            { text: `Analyze this fridge photo. List every visible food item.
 Return ONLY a raw JSON array — no markdown, no code fences, just JSON — like:
 [{"name":"Milk","icon":"🥛","daysUntilExpiry":5},{"name":"Eggs","icon":"🥚","daysUntilExpiry":14}]
 Rules:
@@ -62,18 +58,27 @@ Rules:
 - Be conservative with expiry (err on the side of shorter)
 - Only include items you can clearly identify
 - If the fridge is empty or no food is visible, return []` },
-              ],
-            }],
-          }),
-        }
-      );
+          ],
+        }],
+      });
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error?.message ?? `Gemini error ${response.status}`);
+      // Retry with exponential backoff on 429 (rate limit)
+      let response: Response | null = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt > 0) {
+          await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1))); // 1.5s, 3s, 6s
+        }
+        response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        if (response.status !== 429) break;
+        console.log(`[ScanFridge] 429 rate limit, retrying (attempt ${attempt + 1})…`);
       }
 
-      const data = await response.json();
+      if (!response!.ok) {
+        const err = await response!.json();
+        throw new Error(err.error?.message ?? `Gemini error ${response!.status}`);
+      }
+
+      const data = await response!.json();
       const raw = (data.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim()
         .replace(/^```json?\n?/, '')
         .replace(/\n?```$/, '');

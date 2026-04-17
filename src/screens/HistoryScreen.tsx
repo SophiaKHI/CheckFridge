@@ -30,7 +30,7 @@ async function loadHistory(status: Status): Promise<HistoryEntry[]> {
   return Object.values(grouped).sort((a, b) => b.count - a.count);
 }
 
-export default function HistoryScreen() {
+export default function HistoryScreen({ route }: any) {
   const [tab, setTab] = useState<Status>('used');
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,8 +41,17 @@ export default function HistoryScreen() {
     setLoading(false);
   }, []);
 
-  // Reload when screen comes into focus
-  useFocusEffect(useCallback(() => { fetch(tab); }, [tab]));
+  // On focus: honour initialStatus param from navigation (e.g. tapping a drop zone badge),
+  // otherwise reload the current tab
+  useFocusEffect(useCallback(() => {
+    const initial = route.params?.initialStatus as Status | undefined;
+    if (initial && initial !== tab) {
+      setTab(initial);
+      fetch(initial);
+    } else {
+      fetch(tab);
+    }
+  }, [route.params?.initialStatus]));
 
   const switchTab = (status: Status) => {
     setTab(status);
