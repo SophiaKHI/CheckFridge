@@ -1,28 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert,
 } from 'react-native';
 import { useFridgeStore } from '../store/fridgeStore';
+import { supabase } from '../lib/supabase';
 import { format, addDays } from 'date-fns';
 
-const COMMON_ITEMS = [
-  { name: 'Milk', icon: '🥛' },
-  { name: 'Eggs', icon: '🥚' },
-  { name: 'Cheese', icon: '🧀' },
-  { name: 'Chicken', icon: '🍗' },
-  { name: 'Spinach', icon: '🥬' },
-  { name: 'Yogurt', icon: '🫙' },
-  { name: 'Butter', icon: '🧈' },
-  { name: 'Salmon', icon: '🐟' },
-  { name: 'Carrots', icon: '🥕' },
-  { name: 'Leftovers', icon: '🍱' },
-  { name: 'Tomatoes', icon: '🍅' },
-  { name: 'Berries', icon: '🫐' },
-  { name: 'Broccoli', icon: '🥦' },
-  { name: 'Beef', icon: '🥩' },
-  { name: 'Apple Juice', icon: '🧃' },
-];
+interface ExpiryRef {
+  name: string;
+  icon: string;
+  fridge_days: number;
+}
 
 const QUICK_EXPIRY = [
   { label: 'Today',  days: 0 },
@@ -37,8 +26,18 @@ export default function AddItemScreen({ navigation }: any) {
   const [icon, setIcon] = useState('🥦');
   const [expiryDate, setExpiryDate] = useState(format(addDays(new Date(), 3), 'yyyy-MM-dd'));
   const [loading, setLoading] = useState(false);
+  const [commonItems, setCommonItems] = useState<ExpiryRef[]>([]);
 
   const { addItem } = useFridgeStore();
+
+  useEffect(() => {
+    supabase
+      .from('expiry_reference')
+      .select('name, icon, fridge_days')
+      .not('fridge_days', 'is', null)
+      .order('name')
+      .then(({ data }) => { if (data?.length) setCommonItems(data as ExpiryRef[]); });
+  }, []);
 
   const handleAdd = async () => {
     if (!name.trim()) { Alert.alert('Please enter an item name'); return; }
@@ -54,19 +53,27 @@ export default function AddItemScreen({ navigation }: any) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionTitle}>Common items</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-        {COMMON_ITEMS.map(item => (
-          <TouchableOpacity
-            key={item.name}
-            style={[styles.chip, name === item.name && styles.chipActive]}
-            onPress={() => { setName(item.name); setIcon(item.icon); }}
-          >
-            <Text style={styles.chipIcon}>{item.icon}</Text>
-            <Text style={[styles.chipText, name === item.name && styles.chipTextActive]}>{item.name}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {commonItems.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Common items</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
+            {commonItems.map(item => (
+              <TouchableOpacity
+                key={item.name}
+                style={[styles.chip, name === item.name && styles.chipActive]}
+                onPress={() => {
+                  setName(item.name);
+                  setIcon(item.icon);
+                  setExpiryDate(format(addDays(new Date(), item.fridge_days), 'yyyy-MM-dd'));
+                }}
+              >
+                <Text style={styles.chipIcon}>{item.icon}</Text>
+                <Text style={[styles.chipText, name === item.name && styles.chipTextActive]}>{item.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
 
       <Text style={styles.sectionTitle}>Item name</Text>
       <TextInput

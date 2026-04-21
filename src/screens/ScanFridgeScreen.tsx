@@ -6,6 +6,7 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { format, addDays } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
+import { supabase } from '../lib/supabase';
 
 const QUICK_EXPIRY = [
   { label: 'Today', days: 0 },
@@ -91,11 +92,29 @@ Rules:
 
       const parsed: Array<{ name: string; icon: string; daysUntilExpiry: number }> = JSON.parse(raw);
 
-      setDetectedItems(parsed.map(i => ({
-        name: i.name,
-        icon: i.icon || '🍽️',
-        expiryDays: Math.max(0, Math.round(i.daysUntilExpiry)),
-      })));
+      // Look up each detected item in expiry_reference for better expiry + icon
+      const { data: refs } = await supabase
+        .from('expiry_reference')
+        .select('name, icon, fridge_days')
+        .not('fridge_days', 'is', null);
+      const refRows = (refs ?? []) as Array<{ name: string; icon: string; fridge_days: number }>;
+
+      const findRef = (itemName: string) => {
+        const needle = itemName.toLowerCase();
+        return refRows.find(r => {
+          const hay = r.name.toLowerCase();
+          return hay === needle || hay.includes(needle) || needle.includes(hay);
+        });
+      };
+
+      setDetectedItems(parsed.map(i => {
+        const ref = findRef(i.name);
+        return {
+          name: i.name,
+          icon: ref?.icon ?? i.icon ?? '🍽️',
+          expiryDays: ref?.fridge_days ?? Math.max(0, Math.round(i.daysUntilExpiry)),
+        };
+      }));
       setPhase('review');
     } catch (err: any) {
       setPhase('camera');
