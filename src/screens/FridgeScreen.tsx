@@ -1,16 +1,105 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, Animated, PanResponder,
+  Dimensions, Animated, PanResponder, Image, Easing,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useFridgeStore } from '../store/fridgeStore';
-import { daysLeft, getExpiryStyle, getBubbleSize, dayLabel, urgency } from '../lib/expiry';
+import { daysLeft, getExpiryStyle, dayLabel, urgency } from '../lib/expiry';
 import { FridgeItem } from '../types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CANVAS_W = SCREEN_W - 32;
-const CANVAS_H = 290;
+
+// Iggo assets — static requires must be at module level
+const IGGO_NEUTRAL = require('../../assets/neutural.png');
+const IGGO_HAPPY = [
+  require('../../assets/happy1.png'),
+  require('../../assets/happy2.png'),
+  require('../../assets/happy3.png'),
+  require('../../assets/happy4.png'),
+];
+const IGGO_SAD = [
+  require('../../assets/sad1.png'),
+  require('../../assets/sad2.png'),
+  require('../../assets/sad3.png'),
+  require('../../assets/sad4.png'),
+];
+
+// ─── Bubble layout ────────────────────────────────────────────────────────────
+
+const BUBBLE_PAD    = 6;
+const BUBBLE_BASE   = 75;
+const BUBBLE_VAR    = 4;   // ±2px from base — nearly uniform sizes
+const CANVAS_MARGIN = 6;   // keeps bubbles inset from edge so float animation never clips
+
+// Iggo is now fully ABOVE the canvas (in iggoRow), so no exclusion zone needed.
+
+function computeBubbleLayout(
+  items: FridgeItem[],
+  canvasW: number,
+  canvasH: number,
+): Array<{ item: FridgeItem; x: number; y: number; size: number }> {
+  if (items.length === 0 || canvasW < 10 || canvasH < 10) return [];
+
+  // 1. Near-uniform sizes — 75px base, ±5px nudge from urgency (max 10px spread)
+  const sizes = items.map(item => {
+    const u = urgency(daysLeft(item.expiry_date));
+    return Math.round(BUBBLE_BASE + (1 - u) * BUBBLE_VAR);
+    // fresh (u=0) → 85px, expired (u=1) → 75px
+  });
+
+  // 2. Elliptical initial placement — uses full canvas width AND height
+  //    so fresh (low urgency) items spread to ALL edges, not just a narrow circle
+  const cx = canvasW / 2;
+  const cy = canvasH / 2;
+  const maxRx = canvasW * 0.44;  // horizontal radius — uses full width
+  const maxRy = canvasH * 0.44;  // vertical radius — uses full height
+
+  const circles = items.map((item, i) => {
+    const u = urgency(daysLeft(item.expiry_date));
+    const angle = (i / items.length) * Math.PI * 2 - Math.PI / 2;
+    const scale = 1 - u * 0.65; // u=0 fresh → outer ellipse; u=1 expired → center
+    return {
+      item,
+      size: sizes[i],
+      x: cx + Math.cos(angle) * maxRx * scale,
+      y: cy + Math.sin(angle) * maxRy * scale,
+    };
+  });
+
+  // 3. Iterative collision resolution — push overlapping pairs apart
+  for (let iter = 0; iter < 250; iter++) {
+    let moved = false;
+    for (let i = 0; i < circles.length; i++) {
+      for (let j = i + 1; j < circles.length; j++) {
+        const dx = circles[j].x - circles[i].x;
+        const dy = circles[j].y - circles[i].y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const minDist = circles[i].size / 2 + circles[j].size / 2 + BUBBLE_PAD;
+        if (dist < minDist) {
+          const push = (minDist - dist) / 2;
+          const nx = dx / dist; const ny = dy / dist;
+          circles[i].x -= nx * push; circles[i].y -= ny * push;
+          circles[j].x += nx * push; circles[j].y += ny * push;
+          moved = true;
+        }
+      }
+      // Clamp inside canvas bounds (inset by CANVAS_MARGIN so float animation never clips)
+      const r = circles[i].size / 2;
+      circles[i].x = Math.max(r + CANVAS_MARGIN, Math.min(canvasW - r - CANVAS_MARGIN, circles[i].x));
+      circles[i].y = Math.max(r + CANVAS_MARGIN, Math.min(canvasH - r - CANVAS_MARGIN, circles[i].y));
+    }
+    if (!moved) break;
+  }
+
+  // Convert center coords → top-left for absolute positioning
+  return circles.map(c => ({
+    item: c.item, size: c.size,
+    x: c.x - c.size / 2,
+    y: c.y - c.size / 2,
+  }));
+}
 
 type ZoneBounds = { x: number; y: number; w: number; h: number };
 
@@ -19,12 +108,19 @@ const hitZone = (mx: number, my: number, z: ZoneBounds) =>
 
 // ─── Bubble ──────────────────────────────────────────────────────────────────
 
+const FLOAT_AMPLITUDE = 4;   // px up/down
+const FLOAT_PERIOD    = 3200; // ms per full cycle
+
 function Bubble({
-  item, onUsed, onTrashed,
+  item, size, floatPhase,
+  onUsed, onTrashed,
   trashZone, usedZone,
   onDragMove, onDragEnd,
 }: {
   item: FridgeItem;
+  size: number;
+  /** 0–1 phase offset so each bubble floats at a different point in the cycle */
+  floatPhase: number;
   onUsed: (id: string) => void;
   onTrashed: (id: string) => void;
   trashZone: React.MutableRefObject<ZoneBounds>;
@@ -34,16 +130,47 @@ function Bubble({
 }) {
   const days = daysLeft(item.expiry_date);
   const style = getExpiryStyle(days);
-  const size = getBubbleSize(days);
   const pan = useRef(new Animated.ValueXY()).current;
   const [isDragging, setIsDragging] = useState(false);
+
+  // Gentle floating animation — each bubble starts at a different phase
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: 1,
+          duration: FLOAT_PERIOD / 2,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: false,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: FLOAT_PERIOD / 2,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: false,
+        }),
+      ])
+    );
+    const delay = Math.round(floatPhase * FLOAT_PERIOD);
+    const timer = setTimeout(() => loop.start(), delay);
+    return () => { clearTimeout(timer); loop.stop(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const floatY = floatAnim.interpolate({
+    inputRange:  [0, 1],
+    outputRange: [FLOAT_AMPLITUDE, -FLOAT_AMPLITUDE],
+  });
 
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => setIsDragging(true),
     onPanResponderMove: (_, g) => {
       pan.setValue({ x: g.dx, y: g.dy });
-      onDragMove(hitZone(g.moveX, g.moveY, trashZone.current), hitZone(g.moveX, g.moveY, usedZone.current));
+      onDragMove(
+        hitZone(g.moveX, g.moveY, trashZone.current),
+        hitZone(g.moveX, g.moveY, usedZone.current),
+      );
     },
     onPanResponderRelease: (_, g) => {
       setIsDragging(false);
@@ -68,11 +195,30 @@ function Bubble({
           width: size, height: size, borderRadius: size / 2,
           backgroundColor: style.bg, borderColor: style.border,
           zIndex: isDragging ? 100 : 5,
-          elevation: isDragging ? 10 : 2,
+          shadowOpacity: isDragging ? 0.22 : 0.1,
+          elevation: isDragging ? 10 : 3,
         },
-        { transform: pan.getTranslateTransform() },
+        {
+          transform: [
+            ...pan.getTranslateTransform(),
+            // Float pauses while dragging so it doesn't fight the gesture
+            ...(isDragging ? [] : [{ translateY: floatY }]),
+          ],
+        },
       ]}
     >
+      {/* Glossy highlight — small white ellipse in upper-left */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          width: size * 0.36, height: size * 0.2,
+          borderRadius: size * 0.12,
+          backgroundColor: 'rgba(255,255,255,0.48)',
+          top: size * 0.11, left: size * 0.16,
+          transform: [{ rotate: '-20deg' }],
+        }}
+      />
       <Text style={styles.bubbleIcon}>{item.icon}</Text>
       <Text style={[styles.bubbleName, { color: style.text }]} numberOfLines={1}>{item.name}</Text>
       <Text style={[styles.bubbleDays, { color: style.text }]}>{dayLabel(days)}</Text>
@@ -87,19 +233,106 @@ type UndoToast = { item: FridgeItem; action: 'used' | 'trashed' } | null;
 export default function FridgeScreen({ navigation }: any) {
   const { items, fetchItems, setStatus, restoreItem } = useFridgeStore();
 
-  // Re-fetch on focus — fixes post-scan and post-add-item refresh
   useFocusEffect(useCallback(() => { fetchItems(); }, []));
 
-  const activeItems = items.filter(i => i.status === 'active');
-  const expiringCount = activeItems.filter(i => daysLeft(i.expiry_date) <= 2).length;
+  // Stable reference — only recomputes when the store's items array changes
+  const activeItems = useMemo(
+    () => items.filter(i => i.status === 'active'),
+    [items],
+  );
 
-  // Drop zone refs — measured with measure() for reliable screen coordinates
-  const trashRef = useRef<View>(null);
-  const usedRef  = useRef<View>(null);
+  // Four categories matching the legend — expired <0, use today =0, expiring 1-3, use soon 4-6, fresh 7+
+  const expiredCount   = useMemo(
+    () => activeItems.filter(i => daysLeft(i.expiry_date) < 0).length,
+    [activeItems],
+  );
+  const useTodayCount  = useMemo(
+    () => activeItems.filter(i => daysLeft(i.expiry_date) === 0).length,
+    [activeItems],
+  );
+  const expiringCount  = useMemo(
+    () => activeItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 1 && d <= 3; }).length,
+    [activeItems],
+  );
+  const useSoonCount   = useMemo(
+    () => activeItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 4 && d <= 6; }).length,
+    [activeItems],
+  );
+
+  // Idle mood: sad when any item needs urgent attention (expired, use today, or expiring 1-3d)
+  const idleMood  = useMemo(
+    () => (expiredCount > 0 || useTodayCount > 0 || expiringCount > 0) ? 'sad' as const : 'neutral' as const,
+    [expiredCount, useTodayCount, expiringCount],
+  );
+  const idleFrame = useMemo(
+    () => expiredCount >= 2 ? 3 : expiredCount === 1 ? 2 : (useTodayCount > 0 || expiringCount >= 3) ? 1 : 0,
+    [expiredCount, useTodayCount, expiringCount],
+  );
+
+  // Debug: log daysLeft for every item + computed mood so issues are visible in Metro
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[Iggo] days per item:',
+        activeItems.map(i => `${i.name}=${daysLeft(i.expiry_date)}`).join(', ') || '(empty)',
+      );
+      console.log(
+        `[Iggo] expired=${expiredCount} useToday=${useTodayCount} expiring=${expiringCount} useSoon=${useSoonCount}` +
+        ` → idleMood=${idleMood} idleFrame=${idleFrame}`,
+      );
+    }
+  }, [activeItems, expiredCount, useTodayCount, expiringCount, useSoonCount, idleMood, idleFrame]);
+
+  // Thought bubble — shows all urgent/non-fresh categories
+  const thoughtBubble = useMemo(() => {
+    if (activeItems.length === 0) return null;
+    const parts: string[] = [];
+    if (expiredCount  > 0) parts.push(`${expiredCount} expired 🔴`);
+    if (useTodayCount > 0) parts.push(`${useTodayCount} use today 🔴`);
+    if (expiringCount > 0) parts.push(`${expiringCount} expiring 🟠`);
+    if (useSoonCount  > 0) parts.push(`${useSoonCount} use soon 🟡`);
+    if (parts.length  > 0) {
+      const color = (expiredCount > 0 || useTodayCount > 0) ? '#E57373' : expiringCount > 0 ? '#D85A30' : '#F59E0B';
+      return { text: parts.join(' · '), color };
+    }
+    return { text: 'All fresh! 🟢', color: '#1D9E75' };
+  }, [activeItems.length, expiredCount, useTodayCount, expiringCount, useSoonCount]);
+
+  // Measured by onLayout so bubbles always fill the actual rendered canvas
+  const [canvasDims, setCanvasDims] = useState({ w: CANVAS_W, h: 380 });
+  const bubbleLayout = useMemo(
+    () => computeBubbleLayout(activeItems, canvasDims.w, canvasDims.h),
+    [activeItems, canvasDims],
+  );
+
+  // Animated positions — existing bubbles spring to new slots when layout changes
+  const bubblePosMap = useRef<Map<string, Animated.ValueXY>>(new Map());
+  useEffect(() => {
+    const currentIds = new Set(bubbleLayout.map(b => b.item.id));
+    // Remove stale entries
+    for (const id of bubblePosMap.current.keys()) {
+      if (!currentIds.has(id)) bubblePosMap.current.delete(id);
+    }
+    // Spring existing bubbles to their new target positions
+    bubbleLayout.forEach(({ item, x, y }) => {
+      const anim = bubblePosMap.current.get(item.id);
+      if (anim) {
+        Animated.spring(anim, {
+          toValue: { x, y },
+          useNativeDriver: false,
+          tension: 55,
+          friction: 11,
+        }).start();
+      }
+      // New items are initialised at render time (see JSX loop)
+    });
+  }, [bubbleLayout]);
+
+  // Drop zone refs
+  const trashRef  = useRef<View>(null);
+  const usedRef   = useRef<View>(null);
   const trashZone = useRef<ZoneBounds>({ x: 0, y: 0, w: 0, h: 0 });
   const usedZone  = useRef<ZoneBounds>({ x: 0, y: 0, w: 0, h: 0 });
 
-  // Highlight animations driven by drag position
   const trashAnim = useRef(new Animated.Value(0)).current;
   const usedAnim  = useRef(new Animated.Value(0)).current;
 
@@ -107,10 +340,7 @@ export default function FridgeScreen({ navigation }: any) {
     trashAnim.setValue(overTrash ? 1 : 0);
     usedAnim.setValue(overUsed ? 1 : 0);
   };
-  const handleDragEnd = () => {
-    trashAnim.setValue(0);
-    usedAnim.setValue(0);
-  };
+  const handleDragEnd = () => { trashAnim.setValue(0); usedAnim.setValue(0); };
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<UndoToast>(null);
@@ -118,9 +348,8 @@ export default function FridgeScreen({ navigation }: any) {
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dismissToast = useCallback(() => {
-    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-      setUndoToast(null);
-    });
+    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true })
+      .start(() => setUndoToast(null));
   }, [toastAnim]);
 
   const showUndoToast = useCallback((item: FridgeItem, action: 'used' | 'trashed') => {
@@ -134,25 +363,65 @@ export default function FridgeScreen({ navigation }: any) {
     if (!undoToast) return;
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     restoreItem(undoToast.item);
-    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
-      setUndoToast(null);
-    });
+    Animated.timing(toastAnim, { toValue: 0, duration: 200, useNativeDriver: true })
+      .start(() => setUndoToast(null));
   }, [undoToast, toastAnim, restoreItem]);
 
-  // Capture full item before setStatus removes it from state
+  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
+
+  // Iggo display state — temporarily overridden by swipe animations, otherwise tracks idle
+  const [iggoMood, setIggoMood]   = useState<'neutral' | 'happy' | 'sad'>(idleMood);
+  const [iggoFrame, setIggoFrame] = useState(idleFrame);
+  const iggoTimers     = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const isAnimatingRef = useRef(false);
+
+  // Sync display to idle whenever fridge state changes and no animation is running
+  useEffect(() => {
+    if (!isAnimatingRef.current) {
+      setIggoMood(idleMood);
+      setIggoFrame(idleFrame);
+    }
+  }, [idleMood, idleFrame]);
+
+  useEffect(() => {
+    if (__DEV__) console.log(`[Iggo] display state → mood=${iggoMood} frame=${iggoFrame}`);
+  }, [iggoMood, iggoFrame]);
+
+  const playIggo = useCallback((mood: 'happy' | 'sad') => {
+    iggoTimers.current.forEach(clearTimeout);
+    iggoTimers.current = [];
+    isAnimatingRef.current = true;
+    setIggoMood(mood);
+    setIggoFrame(0);
+    const FRAME_MS = 100;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    [1, 2, 3].forEach(f => timers.push(setTimeout(() => setIggoFrame(f), FRAME_MS * f)));
+    // After animation, snap back to whatever the current idle state is
+    timers.push(setTimeout(() => {
+      isAnimatingRef.current = false;
+      setIggoMood(idleMood);
+      setIggoFrame(idleFrame);
+    }, FRAME_MS * 4 + 300));
+    iggoTimers.current = timers;
+  }, [idleMood, idleFrame]);
+
+  useEffect(() => () => iggoTimers.current.forEach(clearTimeout), []);
+
+  // All frames pre-rendered to prevent size jumping — see iggoContainer style
+
   const handleUsed = useCallback((id: string) => {
     const item = items.find(i => i.id === id);
     setStatus(id, 'used');
     if (item) showUndoToast(item, 'used');
-  }, [items, setStatus, showUndoToast]);
+    playIggo('happy');
+  }, [items, setStatus, showUndoToast, playIggo]);
 
   const handleTrashed = useCallback((id: string) => {
     const item = items.find(i => i.id === id);
     setStatus(id, 'trashed');
     if (item) showUndoToast(item, 'trashed');
-  }, [items, setStatus, showUndoToast]);
-
-  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
+    playIggo('sad');
+  }, [items, setStatus, showUndoToast, playIggo]);
 
   const trashBg    = trashAnim.interpolate({ inputRange: [0, 1], outputRange: ['#FFF0F0', '#FFBDBD'] });
   const trashScale = trashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
@@ -164,62 +433,95 @@ export default function FridgeScreen({ navigation }: any) {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>My Fridge</Text>
-        {expiringCount > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{expiringCount} expiring soon</Text>
-          </View>
-        )}
       </View>
 
-      {/* Colour legend */}
-      <View style={styles.legend}>
-        {[
-          { color: '#9FE1CB', label: 'Fresh' },
-          { color: '#FAC775', label: 'Use soon' },
-          { color: '#F5C4B3', label: 'Expiring' },
-          { color: '#F7C1C1', label: 'Expired' },
-        ].map(l => (
-          <View key={l.label} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: l.color }]} />
-            <Text style={styles.legendLabel}>{l.label}</Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Bubble canvas — overflow:visible so bubbles can drag outside bounds */}
-      <View style={styles.canvas}>
-        {activeItems.length === 0 ? (
-          <Text style={styles.emptyText}>Your fridge is empty 🎉{'\n'}Add something!</Text>
-        ) : (
-          activeItems.map((item, i) => {
-            const angle = (i / activeItems.length) * Math.PI * 2 - Math.PI / 2;
-            const u     = urgency(daysLeft(item.expiry_date));
-            const maxR  = Math.min(CANVAS_W, CANVAS_H) * 0.36;
-            const r     = maxR * (1 - u * 0.7);
-            const size  = getBubbleSize(daysLeft(item.expiry_date));
-            const x     = CANVAS_W / 2 + Math.cos(angle) * r - size / 2;
-            const y     = CANVAS_H / 2 + Math.sin(angle) * r - size / 2;
-
-            return (
-              <View key={item.id} style={{ position: 'absolute', left: x, top: y }}>
-                <Bubble
-                  item={item}
-                  onUsed={handleUsed}
-                  onTrashed={handleTrashed}
-                  trashZone={trashZone}
-                  usedZone={usedZone}
-                  onDragMove={handleDragMove}
-                  onDragEnd={handleDragEnd}
-                />
+      {/* Legend + Iggo row — legend dots and thought bubble on the left, Iggo on the right */}
+      <View style={styles.legendRow}>
+        {/* Left column: legend dots stacked above the thought bubble */}
+        <View style={styles.legendLeft}>
+          <View style={styles.legendDots}>
+            {[
+              { color: '#9FE1CB', label: 'Fresh' },
+              { color: '#FAC775', label: 'Use soon' },
+              { color: '#F5C4B3', label: 'Expiring' },
+              { color: '#F7C1C1', label: 'Expired' },
+            ].map(l => (
+              <View key={l.label} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: l.color }]} />
+                <Text style={styles.legendLabel}>{l.label}</Text>
               </View>
-            );
-          })
-        )}
+            ))}
+          </View>
+
+          {/* Status badge — simple pill showing fridge state */}
+          {thoughtBubble && (
+            <View style={[styles.statusBadge, { borderColor: thoughtBubble.color }]}>
+              <Text style={[styles.statusBadgeText, { color: thoughtBubble.color }]}>
+                {thoughtBubble.text}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Iggo — flex child on the right; frames are position:absolute inside the container */}
+        <View style={styles.iggoContainer}>
+          <Image source={IGGO_NEUTRAL}
+            style={[styles.iggo, { opacity: iggoMood === 'neutral' ? 1 : 0 }]}
+            resizeMode="cover" fadeDuration={0} />
+          {IGGO_HAPPY.map((src, i) => (
+            <Image key={`h${i}`} source={src}
+              style={[styles.iggo, { opacity: iggoMood === 'happy' && iggoFrame === i ? 1 : 0 }]}
+              resizeMode="cover" fadeDuration={0} />
+          ))}
+          {IGGO_SAD.map((src, i) => (
+            <Image key={`s${i}`} source={src}
+              style={[styles.iggo, { opacity: iggoMood === 'sad' && iggoFrame === i ? 1 : 0 }]}
+              resizeMode="cover" fadeDuration={0} />
+          ))}
+        </View>
       </View>
 
-      {/* Drop zones — clearly visible targets BELOW the canvas */}
+      {/* Canvas wrapper — no Iggo inside, so overflow:hidden is clean */}
+      <View style={styles.canvasWrapper}>
+        {/* Bubble canvas — snow globe effect */}
+        <View
+          style={styles.canvas}
+          onLayout={e => {
+            const { width, height } = e.nativeEvent.layout;
+            setCanvasDims(d => d.w === width && d.h === height ? d : { w: width, h: height });
+          }}
+        >
+          {bubbleLayout.length === 0 ? (
+            <Text style={styles.emptyText}>Your fridge is empty 🎉{'\n'}Add something!</Text>
+          ) : (
+            bubbleLayout.map(({ item, x, y, size }, i) => {
+              // Initialise position on first render; existing entries animate via useEffect
+              if (!bubblePosMap.current.has(item.id)) {
+                bubblePosMap.current.set(item.id, new Animated.ValueXY({ x, y }));
+              }
+              const pos = bubblePosMap.current.get(item.id)!;
+              return (
+                <Animated.View key={item.id} style={{ position: 'absolute', left: pos.x, top: pos.y }}>
+                  <Bubble
+                    item={item}
+                    size={size}
+                    floatPhase={i / bubbleLayout.length}
+                    onUsed={handleUsed}
+                    onTrashed={handleTrashed}
+                    trashZone={trashZone}
+                    usedZone={usedZone}
+                    onDragMove={handleDragMove}
+                    onDragEnd={handleDragEnd}
+                  />
+                </Animated.View>
+              );
+            })
+          )}
+        </View>
+      </View>
+
+      {/* Drop zones */}
       <View style={styles.dropRow}>
-        {/* Trash zone */}
         <TouchableOpacity
           style={{ flex: 1 }}
           activeOpacity={0.8}
@@ -243,7 +545,6 @@ export default function FridgeScreen({ navigation }: any) {
           </View>
         </TouchableOpacity>
 
-        {/* Used zone */}
         <TouchableOpacity
           style={{ flex: 1 }}
           activeOpacity={0.8}
@@ -307,39 +608,75 @@ export default function FridgeScreen({ navigation }: any) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 64 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 56 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 0 },
   title: { fontSize: 22, fontWeight: '600', color: '#111' },
-  badge: { backgroundColor: '#FEF3C7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { fontSize: 12, color: '#92400E', fontWeight: '500' },
-  legend: { flexDirection: 'row', gap: 12, marginBottom: 10 },
+  // Combined legend + Iggo row
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  legendLeft: {
+    flex: 1,
+    gap: 4,
+    paddingVertical: 0,
+  },
+  legendDots: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendLabel: { fontSize: 11, color: '#888' },
-  canvas: {
-    width: CANVAS_W, height: CANVAS_H,
-    backgroundColor: '#f8f8f8', borderRadius: 16,
-    borderWidth: 0.5, borderColor: '#eee',
-    overflow: 'visible',          // lets bubbles drag outside canvas into drop zones
+  canvasWrapper: {
+    flex: 1,
     marginBottom: 10,
   },
+  canvas: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 16,
+    borderWidth: 0.5, borderColor: '#eee',
+    overflow: 'hidden',   // snow globe — bubbles clipped cleanly at canvas edge
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  statusBadgeText: { fontSize: 12, fontWeight: '600' },
+  iggoContainer: {
+    // Normal flex child in legendRow — frames are position:absolute inside
+    width: 130, height: 130,
+    marginRight: -16, // bleed to the right screen edge (matches container padding)
+    flexShrink: 0,
+    backgroundColor: 'transparent',
+  },
+  iggo: {
+    position: 'absolute', // all 9 frames stack on top of each other
+    width: 130, height: 130,
+    backgroundColor: 'transparent',
+  },
   bubble: {
-    position: 'absolute', borderWidth: 2,
+    position: 'absolute', borderWidth: 1.5,
     alignItems: 'center', justifyContent: 'center', padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   bubbleIcon: { fontSize: 20 },
   bubbleName: { fontSize: 9, fontWeight: '500', textAlign: 'center', maxWidth: '90%' },
   bubbleDays: { fontSize: 8, opacity: 0.85 },
   emptyText: { textAlign: 'center', marginTop: 100, color: '#aaa', fontSize: 15, lineHeight: 24 },
   dropRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  dropTarget: {
-    height: 80, borderRadius: 14,
-    overflow: 'hidden',           // clips Animated.View scale so it stays within bounds
-  },
-  dropInner: {
-    borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center', gap: 4,
-  },
+  dropTarget: { height: 80, borderRadius: 14, overflow: 'hidden' },
+  dropInner: { borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 4 },
   dropIcon: { fontSize: 26 },
   dropLabel: { fontSize: 11, fontWeight: '500', color: '#888' },
   actions: { flexDirection: 'row', gap: 10 },
