@@ -8,14 +8,6 @@ import { format, addDays } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
 import { supabase } from '../lib/supabase';
 
-const QUICK_EXPIRY = [
-  { label: 'Today', days: 0 },
-  { label: '3d',    days: 3 },
-  { label: '5d',    days: 5 },
-  { label: '1w',    days: 7 },
-  { label: '2w',    days: 14 },
-];
-
 const PURCHASE_AGO = [
   { label: 'Today',        days: 0  },
   { label: 'Few days ago', days: 3  },
@@ -226,27 +218,6 @@ Rules:
                 <Text style={styles.removeBtn}>✕</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.expiryRow}>
-              {QUICK_EXPIRY.map(q => (
-                <TouchableOpacity
-                  key={q.label}
-                  style={[styles.expiryChip, item.expiryDays === q.days && styles.expiryChipActive]}
-                  onPress={() => updateItem(index, { expiryDays: q.days })}
-                >
-                  <Text style={[styles.expiryChipText, item.expiryDays === q.days && styles.expiryChipTextActive]}>
-                    {q.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {(() => {
-                const net = item.expiryDays - item.purchaseDaysAgo;
-                return (
-                  <Text style={styles.expiryDate}>
-                    {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
-                  </Text>
-                );
-              })()}
-            </View>
             <View style={styles.purchaseRow}>
               <Text style={styles.purchaseLabel}>Bought:</Text>
               {PURCHASE_AGO.map(p => (
@@ -260,6 +231,14 @@ Rules:
                   </Text>
                 </TouchableOpacity>
               ))}
+              {(() => {
+                const net = item.expiryDays - item.purchaseDaysAgo;
+                return (
+                  <Text style={styles.expiryDate}>
+                    {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
+                  </Text>
+                );
+              })()}
             </View>
           </View>
         ))}

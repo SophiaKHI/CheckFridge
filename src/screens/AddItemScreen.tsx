@@ -39,6 +39,14 @@ export default function AddItemScreen({ navigation }: any) {
   const expiryDate  = addDays(purchaseDate, shelfDays);
   const expiryLabel = format(expiryDate, 'd MMMM yyyy');
 
+  // Debug: trace expiry calculation so mismatches are visible in Metro
+  const matchedRef = commonItems.find(i => i.name === name);
+  console.log(
+    `[AddItem] name="${name}" matched="${matchedRef?.name ?? 'none'}" ` +
+    `fridge_days=${matchedRef?.fridge_days ?? 'n/a'} shelfDays=${shelfDays} ` +
+    `purchaseDate=${format(purchaseDate, 'yyyy-MM-dd')} → expiry=${format(expiryDate, 'yyyy-MM-dd')}`,
+  );
+
   const handleAdd = async () => {
     if (!name.trim()) { Alert.alert('Please enter an item name'); return; }
     setLoading(true);
