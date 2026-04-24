@@ -261,23 +261,16 @@ export default function FridgeScreen({ navigation }: any) {
 
   // Resting scale: +1=happy1 (all fresh), 0=neutral (any 1-6d), -3=sad3 (any expired/today)
   const restingScale = useMemo(() => {
-    if (expiredCount > 0 || useTodayCount > 0) return -3;
-    if (expiringCount > 0 || useSoonCount > 0) return 0;
-    return 1;
-  }, [expiredCount, useTodayCount, expiringCount, useSoonCount]);
-
-  // Debug: log per-item daysLeft and resting scale so mood issues are visible in Metro
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('[Iggo] days per item:',
-        activeItems.map(i => `${i.name}=${daysLeft(i.expiry_date)}`).join(', ') || '(empty)',
-      );
-      console.log(
-        `[Iggo] expired=${expiredCount} useToday=${useTodayCount} expiring=${expiringCount} useSoon=${useSoonCount}` +
-        ` → restingScale=${restingScale}`,
-      );
-    }
-  }, [activeItems, expiredCount, useTodayCount, expiringCount, useSoonCount, restingScale]);
+    const days = activeItems.map(i => daysLeft(i.expiry_date));
+    const expiredN  = days.filter(d => d <= 0).length;
+    const expiringN = days.filter(d => d >= 1 && d <= 6).length;
+    const scale = expiredN > 0 ? -3 : expiringN > 0 ? 0 : 1;
+    console.log(
+      `[Iggo mood] items daysLeft: [${days.join(', ')}], ` +
+      `expired count: ${expiredN}, expiring count: ${expiringN}, resting scale: ${scale}`,
+    );
+    return scale;
+  }, [activeItems]);
 
   // Thought bubble — shows all urgent/non-fresh categories
   const thoughtBubble = useMemo(() => {
@@ -374,6 +367,7 @@ export default function FridgeScreen({ navigation }: any) {
 
   // Snap to resting whenever fridge state changes and no swipe is in progress
   useEffect(() => {
+    console.log(`[Iggo sync] restingScale changed to ${restingScale}, isSwiping=${isSwipingRef.current} → ${isSwipingRef.current ? 'skipped' : 'applying'}`);
     if (!isSwipingRef.current) setMoodScale(restingScale);
   }, [restingScale]);
 
@@ -383,7 +377,7 @@ export default function FridgeScreen({ navigation }: any) {
   const iggoFrame = moodScale === 0 ? 0 : moodScale > 0 ? moodScale - 1 : -moodScale - 1;
 
   useEffect(() => {
-    if (__DEV__) console.log(`[Iggo] scale=${moodScale} → ${iggoMood}${iggoFrame + 1}`);
+    console.log(`[Iggo display] moodScale=${moodScale} → ${iggoMood}${iggoFrame + 1}`);
   }, [moodScale]);
 
   // Swipe: move 1 step toward happy/sad from current position, hold 3 s, return to resting
