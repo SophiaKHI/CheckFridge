@@ -26,6 +26,13 @@ const IGGO_SAD = [
   require('../../assets/sad4.png'),
 ];
 
+// Returns the correct image source for a given mood scale value
+function sourceForScale(scale: number) {
+  if (scale === 0) return IGGO_NEUTRAL;
+  if (scale > 0) return IGGO_HAPPY[Math.min(scale - 1, 3)];
+  return IGGO_SAD[Math.min(-scale - 1, 3)];
+}
+
 // ─── Bubble layout ────────────────────────────────────────────────────────────
 
 const BUBBLE_PAD    = 6;
@@ -355,63 +362,53 @@ export default function FridgeScreen({ navigation }: any) {
   useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
 
   // Mood scale: -4 (sad4) … -1 (sad1) … 0 (neutral) … +1 (happy1) … +4 (happy4)
-  // Resting: +1, 0, -3. sad4 / happy4 only reachable through consecutive swipes.
+  // Resting: +1=happy1, 0=neutral, -3=sad3. happy4/sad4 only via consecutive swipes.
   const [moodScale, setMoodScale] = useState(restingScale);
   const iggoTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stepTimersRef   = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isSwipingRef    = useRef(false);
-  const restingScaleRef = useRef(restingScale);  // always current, never stale in closures
-  const moodScaleRef    = useRef(restingScale);  // mirrors moodScale state for timer reads
+  const restingScaleRef = useRef(restingScale);
+  const moodScaleRef    = useRef(restingScale);
+  const iggoOpacity     = useRef(new Animated.Value(1)).current;
 
   useEffect(() => { restingScaleRef.current = restingScale; }, [restingScale]);
   useEffect(() => { moodScaleRef.current = moodScale; }, [moodScale]);
 
-  // Snap to resting whenever fridge state changes and no swipe/return animation is in progress
+  // Snap to resting when fridge state changes outside of a swipe
   useEffect(() => {
     if (!isSwipingRef.current) setMoodScale(restingScale);
   }, [restingScale]);
 
-  // Derive display vars from scale — JSX stays unchanged
-  const iggoMood: 'neutral' | 'happy' | 'sad' =
-    moodScale === 0 ? 'neutral' : moodScale > 0 ? 'happy' : 'sad';
-  const iggoFrame = moodScale === 0 ? 0 : moodScale > 0 ? moodScale - 1 : -moodScale - 1;
+  // Fade out → swap source → fade in (200ms + 200ms = 400ms total)
+  const fadeToResting = useCallback(() => {
+    Animated.timing(iggoOpacity, { toValue: 0, duration: 200, useNativeDriver: true })
+      .start(({ finished }) => {
+        if (!finished) return; // interrupted by a new swipe — let that take over
+        const target = restingScaleRef.current;
+        moodScaleRef.current = target;
+        setMoodScale(target);
+        isSwipingRef.current = false;
+        Animated.timing(iggoOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+      });
+  }, [iggoOpacity]);
 
-  // Swipe: move 1 step, hold 3 s, then step back to resting at 150 ms/frame
+  // Swipe: instant face change, hold 3 s, crossfade back to resting
   const playIggo = useCallback((direction: 'happy' | 'sad') => {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
-    stepTimersRef.current.forEach(clearTimeout);
-    stepTimersRef.current = [];
+    iggoOpacity.stopAnimation();
+    iggoOpacity.setValue(1);
     isSwipingRef.current = true;
     setMoodScale(prev => {
       const next = Math.max(-4, Math.min(4, direction === 'happy' ? prev + 1 : prev - 1));
       moodScaleRef.current = next;
       return next;
     });
-    iggoTimerRef.current = setTimeout(() => {
-      const target  = restingScaleRef.current;
-      const current = moodScaleRef.current;
-      if (current === target) { isSwipingRef.current = false; return; }
-      const step   = current < target ? 1 : -1;
-      const frames: number[] = [];
-      for (let s = current + step; step > 0 ? s <= target : s >= target; s += step) {
-        frames.push(s);
-      }
-      stepTimersRef.current = frames.map((val, i) =>
-        setTimeout(() => {
-          moodScaleRef.current = val;
-          setMoodScale(val);
-          if (i === frames.length - 1) isSwipingRef.current = false;
-        }, i * 150),
-      );
-    }, 3000);
-  }, []); // no deps — all reads go through refs
+    iggoTimerRef.current = setTimeout(fadeToResting, 3000);
+  }, [fadeToResting, iggoOpacity]);
 
   useEffect(() => () => {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
-    stepTimersRef.current.forEach(clearTimeout);
+    iggoOpacity.stopAnimation();
   }, []);
-
-  // All frames pre-rendered to prevent size jumping — see iggoContainer style
 
   const handleUsed = useCallback((id: string) => {
     const item = items.find(i => i.id === id);
@@ -467,22 +464,15 @@ export default function FridgeScreen({ navigation }: any) {
           )}
         </View>
 
-        {/* Iggo — flex child on the right; frames are position:absolute inside the container */}
-        <View style={styles.iggoContainer}>
-          <Image source={IGGO_NEUTRAL}
-            style={[styles.iggo, { opacity: iggoMood === 'neutral' ? 1 : 0 }]}
-            resizeMode="cover" fadeDuration={0} />
-          {IGGO_HAPPY.map((src, i) => (
-            <Image key={`h${i}`} source={src}
-              style={[styles.iggo, { opacity: iggoMood === 'happy' && iggoFrame === i ? 1 : 0 }]}
-              resizeMode="cover" fadeDuration={0} />
-          ))}
-          {IGGO_SAD.map((src, i) => (
-            <Image key={`s${i}`} source={src}
-              style={[styles.iggo, { opacity: iggoMood === 'sad' && iggoFrame === i ? 1 : 0 }]}
-              resizeMode="cover" fadeDuration={0} />
-          ))}
-        </View>
+        {/* Iggo — single Image; source changes on scale update, fades on return to resting */}
+        <Animated.View style={[styles.iggoContainer, { opacity: iggoOpacity }]}>
+          <Image
+            source={sourceForScale(moodScale)}
+            style={styles.iggo}
+            resizeMode="cover"
+            fadeDuration={0}
+          />
+        </Animated.View>
       </View>
 
       {/* Canvas wrapper — no Iggo inside, so overflow:hidden is clean */}
@@ -662,7 +652,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   iggo: {
-    position: 'absolute', // all 9 frames stack on top of each other
     width: 130, height: 130,
     backgroundColor: 'transparent',
   },
