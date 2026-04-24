@@ -368,7 +368,7 @@ export default function FridgeScreen({ navigation }: any) {
   const isSwipingRef    = useRef(false);
   const restingScaleRef = useRef(restingScale);
   const moodScaleRef    = useRef(restingScale);
-  const iggoOpacity     = useRef(new Animated.Value(1)).current;
+  const iggoScale       = useRef(new Animated.Value(1)).current;
 
   useEffect(() => { restingScaleRef.current = restingScale; }, [restingScale]);
   useEffect(() => { moodScaleRef.current = moodScale; }, [moodScale]);
@@ -378,36 +378,35 @@ export default function FridgeScreen({ navigation }: any) {
     if (!isSwipingRef.current) setMoodScale(restingScale);
   }, [restingScale]);
 
-  // Fade out → swap source → fade in (200ms + 200ms = 400ms total)
-  const fadeToResting = useCallback(() => {
-    Animated.timing(iggoOpacity, { toValue: 0, duration: 200, useNativeDriver: true })
-      .start(({ finished }) => {
-        if (!finished) return; // interrupted by a new swipe — let that take over
-        const target = restingScaleRef.current;
-        moodScaleRef.current = target;
-        setMoodScale(target);
-        isSwipingRef.current = false;
-        Animated.timing(iggoOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-      });
-  }, [iggoOpacity]);
+  // Instant source swap + subtle scale bounce (1.0 → 1.05 → 1.0, 200ms)
+  const bounceToResting = useCallback(() => {
+    const target = restingScaleRef.current;
+    moodScaleRef.current = target;
+    setMoodScale(target);
+    isSwipingRef.current = false;
+    Animated.sequence([
+      Animated.timing(iggoScale, { toValue: 1.05, duration: 100, useNativeDriver: true }),
+      Animated.timing(iggoScale, { toValue: 1.0,  duration: 100, useNativeDriver: true }),
+    ]).start();
+  }, [iggoScale]);
 
-  // Swipe: instant face change, hold 3 s, crossfade back to resting
+  // Swipe: instant source change, hold 3 s, snap back to resting with bounce
   const playIggo = useCallback((direction: 'happy' | 'sad') => {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
-    iggoOpacity.stopAnimation();
-    iggoOpacity.setValue(1);
+    iggoScale.stopAnimation();
+    iggoScale.setValue(1);
     isSwipingRef.current = true;
     setMoodScale(prev => {
       const next = Math.max(-4, Math.min(4, direction === 'happy' ? prev + 1 : prev - 1));
       moodScaleRef.current = next;
       return next;
     });
-    iggoTimerRef.current = setTimeout(fadeToResting, 3000);
-  }, [fadeToResting, iggoOpacity]);
+    iggoTimerRef.current = setTimeout(bounceToResting, 3000);
+  }, [bounceToResting, iggoScale]);
 
   useEffect(() => () => {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
-    iggoOpacity.stopAnimation();
+    iggoScale.stopAnimation();
   }, []);
 
   const handleUsed = useCallback((id: string) => {
@@ -464,8 +463,8 @@ export default function FridgeScreen({ navigation }: any) {
           )}
         </View>
 
-        {/* Iggo — single Image; source changes on scale update, fades on return to resting */}
-        <Animated.View style={[styles.iggoContainer, { opacity: iggoOpacity }]}>
+        {/* Iggo — single Image; source swaps instantly, scale bounces on return to resting */}
+        <Animated.View style={[styles.iggoContainer, { transform: [{ scale: iggoScale }] }]}>
           <Image
             source={sourceForScale(moodScale)}
             style={styles.iggo}
