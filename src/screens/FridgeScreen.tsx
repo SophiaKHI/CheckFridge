@@ -358,12 +358,15 @@ export default function FridgeScreen({ navigation }: any) {
   // Resting: +1, 0, -3. sad4 / happy4 only reachable through consecutive swipes.
   const [moodScale, setMoodScale] = useState(restingScale);
   const iggoTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stepTimersRef   = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isSwipingRef    = useRef(false);
-  // Always holds the latest restingScale so the timer closure never goes stale
-  const restingScaleRef = useRef(restingScale);
-  useEffect(() => { restingScaleRef.current = restingScale; }, [restingScale]);
+  const restingScaleRef = useRef(restingScale);  // always current, never stale in closures
+  const moodScaleRef    = useRef(restingScale);  // mirrors moodScale state for timer reads
 
-  // Snap to resting whenever fridge state changes and no swipe is in progress
+  useEffect(() => { restingScaleRef.current = restingScale; }, [restingScale]);
+  useEffect(() => { moodScaleRef.current = moodScale; }, [moodScale]);
+
+  // Snap to resting whenever fridge state changes and no swipe/return animation is in progress
   useEffect(() => {
     if (!isSwipingRef.current) setMoodScale(restingScale);
   }, [restingScale]);
@@ -373,19 +376,40 @@ export default function FridgeScreen({ navigation }: any) {
     moodScale === 0 ? 'neutral' : moodScale > 0 ? 'happy' : 'sad';
   const iggoFrame = moodScale === 0 ? 0 : moodScale > 0 ? moodScale - 1 : -moodScale - 1;
 
-  // Swipe: move 1 step toward happy/sad from current position, hold 3 s, return to resting
+  // Swipe: move 1 step, hold 3 s, then step back to resting at 150 ms/frame
   const playIggo = useCallback((direction: 'happy' | 'sad') => {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
+    stepTimersRef.current.forEach(clearTimeout);
+    stepTimersRef.current = [];
     isSwipingRef.current = true;
-    setMoodScale(prev => Math.max(-4, Math.min(4, direction === 'happy' ? prev + 1 : prev - 1)));
+    setMoodScale(prev => {
+      const next = Math.max(-4, Math.min(4, direction === 'happy' ? prev + 1 : prev - 1));
+      moodScaleRef.current = next;
+      return next;
+    });
     iggoTimerRef.current = setTimeout(() => {
-      // Always sync to current resting scale — reads ref so it's never stale
-      isSwipingRef.current = false;
-      setMoodScale(restingScaleRef.current);
+      const target  = restingScaleRef.current;
+      const current = moodScaleRef.current;
+      if (current === target) { isSwipingRef.current = false; return; }
+      const step   = current < target ? 1 : -1;
+      const frames: number[] = [];
+      for (let s = current + step; step > 0 ? s <= target : s >= target; s += step) {
+        frames.push(s);
+      }
+      stepTimersRef.current = frames.map((val, i) =>
+        setTimeout(() => {
+          moodScaleRef.current = val;
+          setMoodScale(val);
+          if (i === frames.length - 1) isSwipingRef.current = false;
+        }, i * 150),
+      );
     }, 3000);
-  }, []); // no deps — reads refs, never stale
+  }, []); // no deps — all reads go through refs
 
-  useEffect(() => () => { if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current); }, []);
+  useEffect(() => () => {
+    if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
+    stepTimersRef.current.forEach(clearTimeout);
+  }, []);
 
   // All frames pre-rendered to prevent size jumping — see iggoContainer style
 
