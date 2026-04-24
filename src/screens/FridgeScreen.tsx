@@ -259,17 +259,14 @@ export default function FridgeScreen({ navigation }: any) {
     [activeItems],
   );
 
-  // Idle mood: sad when any item needs urgent attention (expired, use today, or expiring 1-3d)
-  const idleMood  = useMemo(
-    () => (expiredCount > 0 || useTodayCount > 0 || expiringCount > 0) ? 'sad' as const : 'neutral' as const,
-    [expiredCount, useTodayCount, expiringCount],
-  );
-  const idleFrame = useMemo(
-    () => expiredCount >= 2 ? 3 : expiredCount === 1 ? 2 : (useTodayCount > 0 || expiringCount >= 3) ? 1 : 0,
-    [expiredCount, useTodayCount, expiringCount],
-  );
+  // Resting scale: +1=happy1 (all fresh), 0=neutral (any 1-6d), -3=sad3 (any expired/today)
+  const restingScale = useMemo(() => {
+    if (expiredCount > 0 || useTodayCount > 0) return -3;
+    if (expiringCount > 0 || useSoonCount > 0) return 0;
+    return 1;
+  }, [expiredCount, useTodayCount, expiringCount, useSoonCount]);
 
-  // Debug: log daysLeft for every item + computed mood so issues are visible in Metro
+  // Debug: log per-item daysLeft and resting scale so mood issues are visible in Metro
   useEffect(() => {
     if (__DEV__) {
       console.log('[Iggo] days per item:',
@@ -277,10 +274,10 @@ export default function FridgeScreen({ navigation }: any) {
       );
       console.log(
         `[Iggo] expired=${expiredCount} useToday=${useTodayCount} expiring=${expiringCount} useSoon=${useSoonCount}` +
-        ` → idleMood=${idleMood} idleFrame=${idleFrame}`,
+        ` → restingScale=${restingScale}`,
       );
     }
-  }, [activeItems, expiredCount, useTodayCount, expiringCount, useSoonCount, idleMood, idleFrame]);
+  }, [activeItems, expiredCount, useTodayCount, expiringCount, useSoonCount, restingScale]);
 
   // Thought bubble — shows all urgent/non-fresh categories
   const thoughtBubble = useMemo(() => {
@@ -369,43 +366,38 @@ export default function FridgeScreen({ navigation }: any) {
 
   useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
 
-  // Iggo display state — temporarily overridden by swipe animations, otherwise tracks idle
-  const [iggoMood, setIggoMood]   = useState<'neutral' | 'happy' | 'sad'>(idleMood);
-  const [iggoFrame, setIggoFrame] = useState(idleFrame);
-  const iggoTimers     = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const isAnimatingRef = useRef(false);
+  // Mood scale: -4 (sad4) … -1 (sad1) … 0 (neutral) … +1 (happy1) … +4 (happy4)
+  // Resting: +1, 0, -3. sad4 / happy4 only reachable through consecutive swipes.
+  const [moodScale, setMoodScale] = useState(restingScale);
+  const iggoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSwipingRef = useRef(false);
 
-  // Sync display to idle whenever fridge state changes and no animation is running
+  // Snap to resting whenever fridge state changes and no swipe is in progress
   useEffect(() => {
-    if (!isAnimatingRef.current) {
-      setIggoMood(idleMood);
-      setIggoFrame(idleFrame);
-    }
-  }, [idleMood, idleFrame]);
+    if (!isSwipingRef.current) setMoodScale(restingScale);
+  }, [restingScale]);
+
+  // Derive display vars from scale — JSX stays unchanged
+  const iggoMood: 'neutral' | 'happy' | 'sad' =
+    moodScale === 0 ? 'neutral' : moodScale > 0 ? 'happy' : 'sad';
+  const iggoFrame = moodScale === 0 ? 0 : moodScale > 0 ? moodScale - 1 : -moodScale - 1;
 
   useEffect(() => {
-    if (__DEV__) console.log(`[Iggo] display state → mood=${iggoMood} frame=${iggoFrame}`);
-  }, [iggoMood, iggoFrame]);
+    if (__DEV__) console.log(`[Iggo] scale=${moodScale} → ${iggoMood}${iggoFrame + 1}`);
+  }, [moodScale]);
 
-  const playIggo = useCallback((mood: 'happy' | 'sad') => {
-    iggoTimers.current.forEach(clearTimeout);
-    iggoTimers.current = [];
-    isAnimatingRef.current = true;
-    setIggoMood(mood);
-    setIggoFrame(0);
-    const FRAME_MS = 100;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    [1, 2, 3].forEach(f => timers.push(setTimeout(() => setIggoFrame(f), FRAME_MS * f)));
-    // After animation, snap back to whatever the current idle state is
-    timers.push(setTimeout(() => {
-      isAnimatingRef.current = false;
-      setIggoMood(idleMood);
-      setIggoFrame(idleFrame);
-    }, FRAME_MS * 4 + 300));
-    iggoTimers.current = timers;
-  }, [idleMood, idleFrame]);
+  // Swipe: move 1 step toward happy/sad from current position, hold 3 s, return to resting
+  const playIggo = useCallback((direction: 'happy' | 'sad') => {
+    if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
+    isSwipingRef.current = true;
+    setMoodScale(prev => Math.max(-4, Math.min(4, direction === 'happy' ? prev + 1 : prev - 1)));
+    iggoTimerRef.current = setTimeout(() => {
+      isSwipingRef.current = false;
+      setMoodScale(restingScale);
+    }, 3000);
+  }, [restingScale]);
 
-  useEffect(() => () => iggoTimers.current.forEach(clearTimeout), []);
+  useEffect(() => () => { if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current); }, []);
 
   // All frames pre-rendered to prevent size jumping — see iggoContainer style
 
