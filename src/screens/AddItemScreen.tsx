@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert,
+  StyleSheet, ScrollView, Alert, Platform,
 } from 'react-native';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFridgeStore } from '../store/fridgeStore';
 import { supabase } from '../lib/supabase';
-import { format, addDays, subDays, parseISO } from 'date-fns';
+import { format, addDays } from 'date-fns';
 
 interface ExpiryRef {
   name: string;
@@ -13,27 +14,14 @@ interface ExpiryRef {
   fridge_days: number;
 }
 
-const QUICK_EXPIRY = [
-  { label: 'Today',  days: 0 },
-  { label: '1 day',  days: 1 },
-  { label: '3 days', days: 3 },
-  { label: '1 week', days: 7 },
-  { label: '2 weeks', days: 14 },
-];
-
-const PURCHASE_AGO = [
-  { label: 'Today',        days: 0  },
-  { label: 'Few days ago', days: 3  },
-  { label: '~1 week ago',  days: 7  },
-  { label: '2+ weeks ago', days: 14 },
-];
+const DEFAULT_SHELF_DAYS = 7;
 
 export default function AddItemScreen({ navigation }: any) {
-  const [name, setName] = useState('');
-  const [icon, setIcon] = useState('🥦');
-  const [expiryDate, setExpiryDate] = useState(format(addDays(new Date(), 3), 'yyyy-MM-dd'));
-  const [purchaseDaysAgo, setPurchaseDaysAgo] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [name, setName]               = useState('');
+  const [icon, setIcon]               = useState('🥦');
+  const [shelfDays, setShelfDays]     = useState(DEFAULT_SHELF_DAYS);
+  const [purchaseDate, setPurchaseDate] = useState(new Date());
+  const [loading, setLoading]         = useState(false);
   const [commonItems, setCommonItems] = useState<ExpiryRef[]>([]);
 
   const { addItem } = useFridgeStore();
@@ -47,20 +35,20 @@ export default function AddItemScreen({ navigation }: any) {
       .then(({ data }) => { if (data?.length) setCommonItems(data as ExpiryRef[]); });
   }, []);
 
-  const effectiveDate = purchaseDaysAgo > 0
-    ? format(subDays(parseISO(expiryDate), purchaseDaysAgo), 'yyyy-MM-dd')
-    : expiryDate;
+  // Derived expiry: purchase date + shelf life from reference (or 7-day default)
+  const expiryDate  = addDays(purchaseDate, shelfDays);
+  const expiryLabel = format(expiryDate, 'd MMMM yyyy');
 
   const handleAdd = async () => {
     if (!name.trim()) { Alert.alert('Please enter an item name'); return; }
     setLoading(true);
-    await addItem({ name: name.trim(), icon, expiry_date: effectiveDate });
+    await addItem({ name: name.trim(), icon, expiry_date: format(expiryDate, 'yyyy-MM-dd') });
     setLoading(false);
     navigation.goBack();
   };
 
-  const pickQuick = (days: number) => {
-    setExpiryDate(format(addDays(new Date(), days), 'yyyy-MM-dd'));
+  const onDateChange = (_event: DateTimePickerEvent, date?: Date) => {
+    if (date) setPurchaseDate(date);
   };
 
   return (
@@ -76,7 +64,7 @@ export default function AddItemScreen({ navigation }: any) {
                 onPress={() => {
                   setName(item.name);
                   setIcon(item.icon);
-                  setExpiryDate(format(addDays(new Date(), item.fridge_days), 'yyyy-MM-dd'));
+                  setShelfDays(item.fridge_days);
                 }}
               >
                 <Text style={styles.chipIcon}>{item.icon}</Text>
@@ -92,7 +80,11 @@ export default function AddItemScreen({ navigation }: any) {
         style={styles.input}
         placeholder="e.g. Leftover pasta"
         value={name}
-        onChangeText={setName}
+        onChangeText={text => {
+          setName(text);
+          // Reset shelf days to default when user types a custom name
+          if (!commonItems.find(i => i.name === text)) setShelfDays(DEFAULT_SHELF_DAYS);
+        }}
       />
 
       <Text style={styles.sectionTitle}>Emoji icon</Text>
@@ -103,33 +95,23 @@ export default function AddItemScreen({ navigation }: any) {
         maxLength={2}
       />
 
-      <Text style={styles.sectionTitle}>When did you buy it?</Text>
-      <View style={styles.quickRow}>
-        {PURCHASE_AGO.map(p => (
-          <TouchableOpacity
-            key={p.label}
-            style={[styles.quickBtn, purchaseDaysAgo === p.days && styles.quickBtnActive]}
-            onPress={() => setPurchaseDaysAgo(p.days)}
-          >
-            <Text style={styles.quickBtnText}>{p.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <Text style={styles.sectionTitle}>Purchase date</Text>
+      <View style={styles.pickerContainer}>
+        <DateTimePicker
+          value={purchaseDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          maximumDate={new Date()}
+          onChange={onDateChange}
+          style={styles.datePicker}
+          themeVariant="light"
+        />
       </View>
 
-      <Text style={styles.sectionTitle}>Expires in</Text>
-      <View style={styles.quickRow}>
-        {QUICK_EXPIRY.map(q => (
-          <TouchableOpacity
-            key={q.label}
-            style={[styles.quickBtn, expiryDate === format(addDays(new Date(), q.days), 'yyyy-MM-dd') && styles.quickBtnActive]}
-            onPress={() => pickQuick(q.days)}
-          >
-            <Text style={styles.quickBtnText}>{q.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.expiryRow}>
+        <Text style={styles.expiryLabel}>Expires: </Text>
+        <Text style={styles.expiryValue}>{expiryLabel}</Text>
       </View>
-
-      <Text style={styles.expiryText}>Expiry date: {effectiveDate}</Text>
 
       <TouchableOpacity style={styles.addBtn} onPress={handleAdd} disabled={loading}>
         <Text style={styles.addBtnText}>{loading ? 'Adding…' : `Add ${icon} ${name || 'item'}`}</Text>
@@ -157,14 +139,20 @@ const styles = StyleSheet.create({
     padding: 14, fontSize: 15, backgroundColor: '#fafafa',
   },
   emojiInput: { fontSize: 24, textAlign: 'center', width: 70 },
-  quickRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  quickBtn: {
-    backgroundColor: '#f5f5f5', borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: 'transparent',
+  pickerContainer: {
+    backgroundColor: '#fafafa', borderRadius: 12,
+    borderWidth: 1, borderColor: '#e5e5e5',
+    overflow: 'hidden',
   },
-  quickBtnActive: { borderColor: '#1D9E75', backgroundColor: '#f0fdf9' },
-  quickBtnText: { fontSize: 13, color: '#555' },
-  expiryText: { fontSize: 12, color: '#aaa', marginTop: 8 },
+  datePicker: {
+    height: 160,
+  },
+  expiryRow: {
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: 12, paddingHorizontal: 4,
+  },
+  expiryLabel: { fontSize: 14, color: '#888' },
+  expiryValue: { fontSize: 14, fontWeight: '600', color: '#1D9E75' },
   addBtn: {
     backgroundColor: '#1D9E75', borderRadius: 14, padding: 16,
     alignItems: 'center', marginTop: 28,
