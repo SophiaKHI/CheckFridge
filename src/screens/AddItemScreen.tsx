@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFridgeStore } from '../store/fridgeStore';
 import { supabase } from '../lib/supabase';
-import { format, addDays } from 'date-fns';
+import { format, addDays, subDays, parseISO } from 'date-fns';
 
 interface ExpiryRef {
   name: string;
@@ -21,10 +21,18 @@ const QUICK_EXPIRY = [
   { label: '2 weeks', days: 14 },
 ];
 
+const PURCHASE_AGO = [
+  { label: 'Today',        days: 0  },
+  { label: 'Few days ago', days: 3  },
+  { label: '~1 week ago',  days: 7  },
+  { label: '2+ weeks ago', days: 14 },
+];
+
 export default function AddItemScreen({ navigation }: any) {
   const [name, setName] = useState('');
   const [icon, setIcon] = useState('🥦');
   const [expiryDate, setExpiryDate] = useState(format(addDays(new Date(), 3), 'yyyy-MM-dd'));
+  const [purchaseDaysAgo, setPurchaseDaysAgo] = useState(0);
   const [loading, setLoading] = useState(false);
   const [commonItems, setCommonItems] = useState<ExpiryRef[]>([]);
 
@@ -39,10 +47,14 @@ export default function AddItemScreen({ navigation }: any) {
       .then(({ data }) => { if (data?.length) setCommonItems(data as ExpiryRef[]); });
   }, []);
 
+  const effectiveDate = purchaseDaysAgo > 0
+    ? format(subDays(parseISO(expiryDate), purchaseDaysAgo), 'yyyy-MM-dd')
+    : expiryDate;
+
   const handleAdd = async () => {
     if (!name.trim()) { Alert.alert('Please enter an item name'); return; }
     setLoading(true);
-    await addItem({ name: name.trim(), icon, expiry_date: expiryDate });
+    await addItem({ name: name.trim(), icon, expiry_date: effectiveDate });
     setLoading(false);
     navigation.goBack();
   };
@@ -91,6 +103,19 @@ export default function AddItemScreen({ navigation }: any) {
         maxLength={2}
       />
 
+      <Text style={styles.sectionTitle}>When did you buy it?</Text>
+      <View style={styles.quickRow}>
+        {PURCHASE_AGO.map(p => (
+          <TouchableOpacity
+            key={p.label}
+            style={[styles.quickBtn, purchaseDaysAgo === p.days && styles.quickBtnActive]}
+            onPress={() => setPurchaseDaysAgo(p.days)}
+          >
+            <Text style={styles.quickBtnText}>{p.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <Text style={styles.sectionTitle}>Expires in</Text>
       <View style={styles.quickRow}>
         {QUICK_EXPIRY.map(q => (
@@ -104,7 +129,7 @@ export default function AddItemScreen({ navigation }: any) {
         ))}
       </View>
 
-      <Text style={styles.expiryText}>Expiry date: {expiryDate}</Text>
+      <Text style={styles.expiryText}>Expiry date: {effectiveDate}</Text>
 
       <TouchableOpacity style={styles.addBtn} onPress={handleAdd} disabled={loading}>
         <Text style={styles.addBtnText}>{loading ? 'Adding…' : `Add ${icon} ${name || 'item'}`}</Text>

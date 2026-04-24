@@ -16,10 +16,18 @@ const QUICK_EXPIRY = [
   { label: '2w',    days: 14 },
 ];
 
+const PURCHASE_AGO = [
+  { label: 'Today',        days: 0  },
+  { label: 'Few days ago', days: 3  },
+  { label: '~1 week ago',  days: 7  },
+  { label: '2+ weeks ago', days: 14 },
+];
+
 interface DetectedItem {
   name: string;
   icon: string;
   expiryDays: number;
+  purchaseDaysAgo: number;
 }
 
 type Phase = 'camera' | 'analyzing' | 'review';
@@ -113,6 +121,7 @@ Rules:
           name: i.name,
           icon: ref?.icon ?? i.icon ?? '🍽️',
           expiryDays: ref?.fridge_days ?? Math.max(0, Math.round(i.daysUntilExpiry)),
+          purchaseDaysAgo: 0,
         };
       }));
       setPhase('review');
@@ -138,7 +147,7 @@ Rules:
       await addItem({
         name: item.name,
         icon: item.icon,
-        expiry_date: format(addDays(new Date(), item.expiryDays), 'yyyy-MM-dd'),
+        expiry_date: format(addDays(new Date(), item.expiryDays - item.purchaseDaysAgo), 'yyyy-MM-dd'),
       });
     }
     await fetchItems(); // sync store before navigating back
@@ -229,9 +238,28 @@ Rules:
                   </Text>
                 </TouchableOpacity>
               ))}
-              <Text style={styles.expiryDate}>
-                {item.expiryDays === 0 ? 'expires today' : `expires ${format(addDays(new Date(), item.expiryDays), 'MMM d')}`}
-              </Text>
+              {(() => {
+                const net = item.expiryDays - item.purchaseDaysAgo;
+                return (
+                  <Text style={styles.expiryDate}>
+                    {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
+                  </Text>
+                );
+              })()}
+            </View>
+            <View style={styles.purchaseRow}>
+              <Text style={styles.purchaseLabel}>Bought:</Text>
+              {PURCHASE_AGO.map(p => (
+                <TouchableOpacity
+                  key={p.label}
+                  style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
+                  onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
+                >
+                  <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
+                    {p.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         ))}
@@ -332,4 +360,6 @@ const styles = StyleSheet.create({
     borderRadius: 12, paddingVertical: 13, alignItems: 'center',
   },
   addAllBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  purchaseRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 6 },
+  purchaseLabel: { fontSize: 11, color: '#aaa' },
 });
