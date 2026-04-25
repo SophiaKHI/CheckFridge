@@ -122,7 +122,7 @@ function Bubble({
   item, size, floatPhase,
   onUsed, onTrashed,
   trashZone, usedZone,
-  onDragMove, onDragEnd,
+  onDragStart, onDragMove, onDragEnd,
 }: {
   item: FridgeItem;
   size: number;
@@ -132,6 +132,7 @@ function Bubble({
   onTrashed: (id: string) => void;
   trashZone: React.MutableRefObject<ZoneBounds>;
   usedZone: React.MutableRefObject<ZoneBounds>;
+  onDragStart: (id: string) => void;
   onDragMove: (overTrash: boolean, overUsed: boolean) => void;
   onDragEnd: () => void;
 }) {
@@ -171,7 +172,7 @@ function Bubble({
 
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => setIsDragging(true),
+    onPanResponderGrant: () => { setIsDragging(true); onDragStart(item.id); },
     onPanResponderMove: (_, g) => {
       pan.setValue({ x: g.dx, y: g.dy });
       onDragMove(
@@ -201,7 +202,6 @@ function Bubble({
         {
           width: size, height: size, borderRadius: size / 2,
           backgroundColor: style.bg, borderColor: style.border,
-          zIndex: isDragging ? 100 : 5,
           shadowOpacity: isDragging ? 0.22 : 0.1,
           elevation: isDragging ? 10 : 3,
         },
@@ -328,11 +328,18 @@ export default function FridgeScreen({ navigation }: any) {
   const trashAnim = useRef(new Animated.Value(0)).current;
   const usedAnim  = useRef(new Animated.Value(0)).current;
 
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  const handleDragStart = useCallback((id: string) => setDraggingId(id), []);
   const handleDragMove = (overTrash: boolean, overUsed: boolean) => {
     trashAnim.setValue(overTrash ? 1 : 0);
     usedAnim.setValue(overUsed ? 1 : 0);
   };
-  const handleDragEnd = () => { trashAnim.setValue(0); usedAnim.setValue(0); };
+  const handleDragEnd = () => {
+    trashAnim.setValue(0);
+    usedAnim.setValue(0);
+    setDraggingId(null);
+  };
 
   // Undo toast
   const [undoToast, setUndoToast] = useState<UndoToast>(null);
@@ -474,8 +481,8 @@ export default function FridgeScreen({ navigation }: any) {
         </Animated.View>
       </View>
 
-      {/* Canvas wrapper — no Iggo inside, so overflow:hidden is clean */}
-      <View style={styles.canvasWrapper}>
+      {/* Canvas wrapper — elevated above drop zones while a bubble is being dragged */}
+      <View style={[styles.canvasWrapper, draggingId ? styles.canvasWrapperDragging : null]}>
         {/* Bubble canvas — snow globe effect */}
         <View
           style={styles.canvas}
@@ -493,8 +500,16 @@ export default function FridgeScreen({ navigation }: any) {
                 bubblePosMap.current.set(item.id, new Animated.ValueXY({ x, y }));
               }
               const pos = bubblePosMap.current.get(item.id)!;
+              const isDraggingThis = draggingId === item.id;
               return (
-                <Animated.View key={item.id} style={{ position: 'absolute', left: pos.x, top: pos.y }}>
+                <Animated.View
+                  key={item.id}
+                  style={{
+                    position: 'absolute', left: pos.x, top: pos.y,
+                    zIndex: isDraggingThis ? 999 : 1,
+                    elevation: isDraggingThis ? 20 : 1,
+                  }}
+                >
                   <Bubble
                     item={item}
                     size={size}
@@ -503,6 +518,7 @@ export default function FridgeScreen({ navigation }: any) {
                     onTrashed={handleTrashed}
                     trashZone={trashZone}
                     usedZone={usedZone}
+                    onDragStart={handleDragStart}
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
                   />
@@ -626,13 +642,17 @@ const styles = StyleSheet.create({
   canvasWrapper: {
     flex: 1,
     marginBottom: 10,
+    zIndex: 1,
+  },
+  canvasWrapperDragging: {
+    zIndex: 10,   // lifts above dropRow so the dragged bubble paints over drop zones
   },
   canvas: {
     flex: 1,
     backgroundColor: '#f8f8f8',
     borderRadius: 16,
     borderWidth: 0.5, borderColor: '#eee',
-    overflow: 'hidden',   // snow globe — bubbles clipped cleanly at canvas edge
+    overflow: 'visible',  // must be visible so dragged bubble escapes the canvas bounds
   },
   statusBadge: {
     alignSelf: 'flex-start',
