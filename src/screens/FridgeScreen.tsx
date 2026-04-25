@@ -657,12 +657,12 @@ const styles = StyleSheet.create({
   statusBadge: {
     alignSelf: 'flex-start',
     borderRadius: 20,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     backgroundColor: 'rgba(0,0,0,0.03)',
   },
-  statusBadgeText: { fontSize: 12, fontWeight: '600' },
+  statusBadgeText: { fontSize: 14, fontWeight: '600' },
   iggoContainer: {
     // Normal flex child in legendRow — frames are position:absolute inside
     width: 130, height: 130,
