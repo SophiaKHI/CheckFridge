@@ -7,6 +7,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { format, addDays } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
 import { supabase } from '../lib/supabase';
+import { getOpenedDays } from '../lib/openedShelfLife';
 
 const PURCHASE_AGO = [
   { label: 'Today',        days: 0  },
@@ -24,6 +25,10 @@ interface DetectedItem {
   isEstimate?: boolean;
   /** Set for pantry/shelf-stable items — shown as a small label above the purchase chips */
   storageNote?: string;
+  /** Days after opening before expiry — defined for openable items only */
+  openedDays?: number;
+  /** Whether the user has toggled this item as already opened */
+  isOpened?: boolean;
 }
 
 type Phase = 'camera' | 'analyzing' | 'review';
@@ -171,6 +176,8 @@ Rules:
           `pantry=${pantry} expiryDays=${expiryDays} isEstimate=${isEstimate}`,
         );
 
+        // getOpenedDays with fridgeDays fallback so ref-matched items also get a toggle
+        const openedDays = getOpenedDays(i.name, ref?.fridge_days ?? undefined) ?? undefined;
         return {
           name: i.name,
           icon: i.icon ?? '🍽️',
@@ -178,6 +185,8 @@ Rules:
           purchaseDaysAgo: 0,
           isEstimate,
           storageNote: pantry ? '🏠 Store outside fridge' : undefined,
+          openedDays,
+          isOpened: false,
         };
       }));
       setPhase('review');
@@ -200,11 +209,11 @@ Rules:
   const addAll = async () => {
     setAdding(true);
     for (const item of detectedItems) {
-      await addItem({
-        name: item.name,
-        icon: item.icon,
-        expiry_date: format(addDays(new Date(), item.expiryDays - item.purchaseDaysAgo), 'yyyy-MM-dd'),
-      });
+      const expiryDate =
+        item.isOpened && item.openedDays != null
+          ? format(addDays(new Date(), item.openedDays), 'yyyy-MM-dd')
+          : format(addDays(new Date(), item.expiryDays - item.purchaseDaysAgo), 'yyyy-MM-dd');
+      await addItem({ name: item.name, icon: item.icon, expiry_date: expiryDate });
     }
     await fetchItems(); // sync store before navigating back
     setAdding(false);
@@ -285,29 +294,52 @@ Rules:
             {item.storageNote && (
               <Text style={styles.storageNoteText}>{item.storageNote}</Text>
             )}
-            <View style={styles.purchaseRow}>
-              <Text style={styles.purchaseLabel}>Bought:</Text>
-              {PURCHASE_AGO.map(p => (
+            {item.openedDays != null && (
+              <View style={styles.sealedOpenedRow}>
                 <TouchableOpacity
-                  key={p.label}
-                  style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
-                  onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
+                  style={[styles.sealedChip, !item.isOpened && styles.sealedChipActive]}
+                  onPress={() => updateItem(index, { isOpened: false })}
                 >
-                  <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
-                    {p.label}
-                  </Text>
+                  <Text style={[styles.sealedChipText, !item.isOpened && styles.sealedChipTextActive]}>Sealed</Text>
                 </TouchableOpacity>
-              ))}
-              {(() => {
-                const net = item.expiryDays - item.purchaseDaysAgo;
-                const pre = item.isEstimate ? '~' : '';
-                return (
-                  <Text style={styles.expiryDate}>
-                    {net < 0 ? 'already expired' : net === 0 ? `${pre}expires today` : `${pre}expires ${format(addDays(new Date(), net), 'MMM d')}`}
-                  </Text>
-                );
-              })()}
-            </View>
+                <TouchableOpacity
+                  style={[styles.sealedChip, item.isOpened && styles.openedChipActive]}
+                  onPress={() => updateItem(index, { isOpened: true })}
+                >
+                  <Text style={[styles.sealedChipText, item.isOpened && styles.openedChipTextActive]}>Opened</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {!item.isOpened && (
+              <View style={styles.purchaseRow}>
+                <Text style={styles.purchaseLabel}>Bought:</Text>
+                {PURCHASE_AGO.map(p => (
+                  <TouchableOpacity
+                    key={p.label}
+                    style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
+                    onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
+                  >
+                    <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {(() => {
+                  const net = item.expiryDays - item.purchaseDaysAgo;
+                  const pre = item.isEstimate ? '~' : '';
+                  return (
+                    <Text style={styles.expiryDate}>
+                      {net < 0 ? 'already expired' : net === 0 ? `${pre}expires today` : `${pre}expires ${format(addDays(new Date(), net), 'MMM d')}`}
+                    </Text>
+                  );
+                })()}
+              </View>
+            )}
+            {item.isOpened && item.openedDays != null && (
+              <Text style={styles.openedExpiryText}>
+                Opened today → expires {format(addDays(new Date(), item.openedDays), 'MMM d')}
+              </Text>
+            )}
           </View>
         ))}
 
@@ -410,4 +442,15 @@ const styles = StyleSheet.create({
   purchaseRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 6 },
   purchaseLabel: { fontSize: 11, color: '#aaa' },
   storageNoteText: { fontSize: 12, color: '#888', marginTop: 6 },
+  sealedOpenedRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  sealedChip: {
+    paddingHorizontal: 14, paddingVertical: 5, borderRadius: 14,
+    backgroundColor: '#efefef', borderWidth: 1, borderColor: 'transparent',
+  },
+  sealedChipActive: { borderColor: '#1D9E75', backgroundColor: '#f0fdf9' },
+  openedChipActive: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
+  sealedChipText: { fontSize: 12, color: '#555' },
+  sealedChipTextActive: { color: '#1D9E75', fontWeight: '600' },
+  openedChipTextActive: { color: '#B45309', fontWeight: '600' },
+  openedExpiryText: { fontSize: 12, color: '#B45309', marginTop: 6, fontWeight: '500' },
 });

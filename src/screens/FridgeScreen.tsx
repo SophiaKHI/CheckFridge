@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, Modal, TouchableWithoutFeedback,
   Dimensions, Animated, PanResponder, Image, Easing,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { format, addDays, parseISO } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
 import { daysLeft, getExpiryStyle, dayLabel, urgency } from '../lib/expiry';
+import { isOpenable, getOpenedDays } from '../lib/openedShelfLife';
 import { FridgeItem } from '../types';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -118,11 +120,14 @@ const hitZone = (mx: number, my: number, z: ZoneBounds) =>
 const FLOAT_AMPLITUDE = 4;   // px up/down
 const FLOAT_PERIOD    = 3200; // ms per full cycle
 
+const LONG_PRESS_DELAY = 450; // ms before long-press fires
+const LONG_PRESS_MOVE_THRESHOLD = 8; // px — cancel long-press if finger moved this much
+
 function Bubble({
   item, size, floatPhase,
   onUsed, onTrashed,
   trashZone, usedZone,
-  onDragStart, onDragMove, onDragEnd,
+  onDragStart, onDragMove, onDragEnd, onLongPress,
 }: {
   item: FridgeItem;
   size: number;
@@ -135,11 +140,17 @@ function Bubble({
   onDragStart: (id: string) => void;
   onDragMove: (overTrash: boolean, overUsed: boolean) => void;
   onDragEnd: () => void;
+  onLongPress: () => void;
 }) {
   const days = daysLeft(item.expiry_date);
   const style = getExpiryStyle(days);
+  const openable = isOpenable(item.name);
   const pan = useRef(new Animated.ValueXY()).current;
   const [isDragging, setIsDragging] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasLongPressRef = useRef(false);
+  const onLongPressRef = useRef(onLongPress);
+  useEffect(() => { onLongPressRef.current = onLongPress; }, [onLongPress]);
 
   // Gentle floating animation — each bubble starts at a different phase
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -172,8 +183,27 @@ function Bubble({
 
   const panResponder = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => { setIsDragging(true); onDragStart(item.id); },
+    onPanResponderGrant: () => {
+      wasLongPressRef.current = false;
+      setIsDragging(true);
+      onDragStart(item.id);
+      if (openable) {
+        longPressTimer.current = setTimeout(() => {
+          wasLongPressRef.current = true;
+          setIsDragging(false);
+          onDragEnd();
+          pan.setValue({ x: 0, y: 0 });
+          onLongPressRef.current();
+        }, LONG_PRESS_DELAY);
+      }
+    },
     onPanResponderMove: (_, g) => {
+      // Cancel long press if the finger has moved significantly
+      if (longPressTimer.current &&
+          (Math.abs(g.dx) > LONG_PRESS_MOVE_THRESHOLD || Math.abs(g.dy) > LONG_PRESS_MOVE_THRESHOLD)) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
       pan.setValue({ x: g.dx, y: g.dy });
       onDragMove(
         hitZone(g.moveX, g.moveY, trashZone.current),
@@ -181,6 +211,8 @@ function Bubble({
       );
     },
     onPanResponderRelease: (_, g) => {
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+      if (wasLongPressRef.current) return; // modal already shown, ignore release
       setIsDragging(false);
       onDragEnd();
       if (hitZone(g.moveX, g.moveY, trashZone.current)) { onTrashed(item.id); return; }
@@ -188,6 +220,7 @@ function Bubble({
       Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
     },
     onPanResponderTerminate: () => {
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
       setIsDragging(false);
       onDragEnd();
       Animated.spring(pan, { toValue: { x: 0, y: 0 }, useNativeDriver: false }).start();
@@ -214,6 +247,20 @@ function Bubble({
         },
       ]}
     >
+      {/* Double-border ring — shown for openable items to hint at long-press */}
+      {openable && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: -4, left: -4, right: -4, bottom: -4,
+            borderRadius: size / 2 + 4,
+            borderWidth: 1.5,
+            borderColor: style.border,
+            opacity: 0.45,
+          }}
+        />
+      )}
       {/* Glossy highlight — small white ellipse in upper-left */}
       <View
         pointerEvents="none"
@@ -238,7 +285,7 @@ function Bubble({
 type UndoToast = { item: FridgeItem; action: 'used' | 'trashed' } | null;
 
 export default function FridgeScreen({ navigation }: any) {
-  const { items, fetchItems, setStatus, restoreItem } = useFridgeStore();
+  const { items, fetchItems, setStatus, restoreItem, updateItem } = useFridgeStore();
 
   useFocusEffect(useCallback(() => { fetchItems(); }, []));
 
@@ -329,6 +376,7 @@ export default function FridgeScreen({ navigation }: any) {
   const usedAnim  = useRef(new Animated.Value(0)).current;
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [openModal, setOpenModal] = useState<{ item: FridgeItem; openedDays: number } | null>(null);
 
   const handleDragStart = useCallback((id: string) => setDraggingId(id), []);
   const handleDragMove = (overTrash: boolean, overUsed: boolean) => {
@@ -415,6 +463,13 @@ export default function FridgeScreen({ navigation }: any) {
     if (iggoTimerRef.current) clearTimeout(iggoTimerRef.current);
     iggoScale.stopAnimation();
   }, []);
+
+  const handleMarkOpened = useCallback(async () => {
+    if (!openModal) return;
+    const { item, openedDays } = openModal;
+    await updateItem(item.id, { expiry_date: format(addDays(new Date(), openedDays), 'yyyy-MM-dd') });
+    setOpenModal(null);
+  }, [openModal, updateItem]);
 
   const handleUsed = useCallback((id: string) => {
     const item = items.find(i => i.id === id);
@@ -521,6 +576,10 @@ export default function FridgeScreen({ navigation }: any) {
                     onDragStart={handleDragStart}
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
+                    onLongPress={() => {
+                      const od = getOpenedDays(item.name);
+                      if (od != null) setOpenModal({ item, openedDays: od });
+                    }}
                   />
                 </Animated.View>
               );
@@ -590,6 +649,41 @@ export default function FridgeScreen({ navigation }: any) {
           <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>Scan fridge</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Opened-expiry modal */}
+      <Modal
+        visible={openModal !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpenModal(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setOpenModal(null)}>
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalCard}>
+                <Text style={styles.modalIcon}>{openModal?.item.icon}</Text>
+                <Text style={styles.modalName}>{openModal?.item.name}</Text>
+                <Text style={styles.modalCurrentExpiry}>
+                  Currently expires {openModal ? format(parseISO(openModal.item.expiry_date), 'MMM d') : ''}
+                </Text>
+                <View style={styles.modalDivider} />
+                <Text style={styles.modalOpenedNote}>
+                  Once opened, lasts ~{openModal?.openedDays} days from today
+                </Text>
+                <Text style={styles.modalNewExpiry}>
+                  New expiry: {openModal ? format(addDays(new Date(), openModal.openedDays), 'MMM d') : ''}
+                </Text>
+                <TouchableOpacity style={styles.modalBtn} onPress={handleMarkOpened}>
+                  <Text style={styles.modalBtnText}>Mark as opened</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setOpenModal(null)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}>
+                  <Text style={styles.modalCancel}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* Undo toast */}
       {undoToast && (
@@ -709,4 +803,27 @@ const styles = StyleSheet.create({
   },
   toastText: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '500' },
   toastUndo: { color: '#4ADE80', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
+  modalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center', alignItems: 'center', padding: 32,
+  },
+  modalCard: {
+    backgroundColor: '#fff', borderRadius: 20, padding: 24,
+    alignItems: 'center', width: '100%',
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  modalIcon: { fontSize: 40, marginBottom: 8 },
+  modalName: { fontSize: 18, fontWeight: '700', color: '#111', marginBottom: 4, textAlign: 'center' },
+  modalCurrentExpiry: { fontSize: 13, color: '#aaa', marginBottom: 16 },
+  modalDivider: { width: '100%', height: 1, backgroundColor: '#f0f0f0', marginBottom: 16 },
+  modalOpenedNote: { fontSize: 13, color: '#888', marginBottom: 4, textAlign: 'center' },
+  modalNewExpiry: { fontSize: 15, fontWeight: '600', color: '#1D9E75', marginBottom: 20 },
+  modalBtn: {
+    backgroundColor: '#1D9E75', borderRadius: 12,
+    paddingVertical: 13, paddingHorizontal: 32,
+    width: '100%', alignItems: 'center', marginBottom: 12,
+  },
+  modalBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  modalCancel: { fontSize: 14, color: '#aaa', fontWeight: '500' },
 });

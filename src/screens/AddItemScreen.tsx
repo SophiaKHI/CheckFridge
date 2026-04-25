@@ -7,6 +7,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { useFridgeStore } from '../store/fridgeStore';
 import { supabase } from '../lib/supabase';
 import { format, addDays } from 'date-fns';
+import { getOpenedDays } from '../lib/openedShelfLife';
 
 interface ExpiryRef {
   name: string;
@@ -21,6 +22,7 @@ export default function AddItemScreen({ navigation }: any) {
   const [icon, setIcon]               = useState('🥦');
   const [shelfDays, setShelfDays]     = useState(DEFAULT_SHELF_DAYS);
   const [purchaseDate, setPurchaseDate] = useState(new Date());
+  const [isOpened, setIsOpened]       = useState(false);
   const [loading, setLoading]         = useState(false);
   const [commonItems, setCommonItems] = useState<ExpiryRef[]>([]);
 
@@ -35,8 +37,13 @@ export default function AddItemScreen({ navigation }: any) {
       .then(({ data }) => { if (data?.length) setCommonItems(data as ExpiryRef[]); });
   }, []);
 
-  // Derived expiry: purchase date + shelf life from reference (or 7-day default)
-  const expiryDate  = addDays(purchaseDate, shelfDays);
+  // Opened shelf life — defined when the item is in the openable list
+  const openedDays  = getOpenedDays(name, shelfDays) ?? null;
+
+  // Derived expiry: opened → today + openedDays; sealed → purchase date + shelfDays
+  const expiryDate  = isOpened && openedDays != null
+    ? addDays(new Date(), openedDays)
+    : addDays(purchaseDate, shelfDays);
   const expiryLabel = format(expiryDate, 'd MMMM yyyy');
 
   // Debug: trace expiry calculation so mismatches are visible in Metro
@@ -73,6 +80,7 @@ export default function AddItemScreen({ navigation }: any) {
                   setName(item.name);
                   setIcon(item.icon);
                   setShelfDays(item.fridge_days);
+                  setIsOpened(false);
                 }}
               >
                 <Text style={styles.chipIcon}>{item.icon}</Text>
@@ -90,8 +98,8 @@ export default function AddItemScreen({ navigation }: any) {
         value={name}
         onChangeText={text => {
           setName(text);
-          // Reset shelf days to default when user types a custom name
           if (!commonItems.find(i => i.name === text)) setShelfDays(DEFAULT_SHELF_DAYS);
+          setIsOpened(false);
         }}
       />
 
@@ -103,18 +111,39 @@ export default function AddItemScreen({ navigation }: any) {
         maxLength={2}
       />
 
-      <Text style={styles.sectionTitle}>Purchase date</Text>
-      <View style={styles.pickerContainer}>
-        <DateTimePicker
-          value={purchaseDate}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          maximumDate={new Date()}
-          onChange={onDateChange}
-          style={styles.datePicker}
-          themeVariant="light"
-        />
-      </View>
+      {openedDays != null && (
+        <>
+          <Text style={styles.sectionTitle}>Condition</Text>
+          <View style={styles.sealedOpenedRow}>
+            <TouchableOpacity
+              style={[styles.sealedChip, !isOpened && styles.sealedChipActive]}
+              onPress={() => setIsOpened(false)}
+            >
+              <Text style={[styles.sealedChipText, !isOpened && styles.sealedChipTextActive]}>Sealed</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sealedChip, isOpened && styles.openedChipActive]}
+              onPress={() => setIsOpened(true)}
+            >
+              <Text style={[styles.sealedChipText, isOpened && styles.openedChipTextActive]}>Opened</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
+      {!isOpened && (
+        <View style={styles.pickerContainer}>
+          <DateTimePicker
+            value={purchaseDate}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            maximumDate={new Date()}
+            onChange={onDateChange}
+            style={styles.datePicker}
+            themeVariant="light"
+          />
+        </View>
+      )}
 
       <View style={styles.expiryRow}>
         <Text style={styles.expiryLabel}>Expires: </Text>
@@ -161,6 +190,16 @@ const styles = StyleSheet.create({
   },
   expiryLabel: { fontSize: 14, color: '#888' },
   expiryValue: { fontSize: 14, fontWeight: '600', color: '#1D9E75' },
+  sealedOpenedRow: { flexDirection: 'row', gap: 8 },
+  sealedChip: {
+    paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20,
+    backgroundColor: '#f5f5f5', borderWidth: 1, borderColor: 'transparent',
+  },
+  sealedChipActive: { borderColor: '#1D9E75', backgroundColor: '#f0fdf9' },
+  openedChipActive: { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' },
+  sealedChipText: { fontSize: 14, color: '#555' },
+  sealedChipTextActive: { color: '#1D9E75', fontWeight: '600' },
+  openedChipTextActive: { color: '#B45309', fontWeight: '600' },
   addBtn: {
     backgroundColor: '#1D9E75', borderRadius: 14, padding: 16,
     alignItems: 'center', marginTop: 28,
