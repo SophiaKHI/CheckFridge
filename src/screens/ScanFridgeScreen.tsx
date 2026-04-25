@@ -20,7 +20,9 @@ interface DetectedItem {
   icon: string;
   expiryDays: number;
   purchaseDaysAgo: number;
-  /** Set when we can't give a meaningful expiry — shows a note instead of date chips */
+  /** true when expiryDays is estimated, not from reference data — renders a ~ prefix */
+  isEstimate?: boolean;
+  /** Set for pantry/shelf-stable items — shown as a small label above the purchase chips */
   storageNote?: string;
 }
 
@@ -121,9 +123,6 @@ Rules:
         return undefined;
       };
 
-      const DEFAULT_SHELF_DAYS = 7;
-      const isLongName = (s: string) => s.trim().split(/\s+/).length >= 4;
-
       // Keywords that strongly indicate a shelf-stable / pantry item.
       // Checked against the item name so "Canned Tuna" overrides a fresh-tuna reference match.
       const PANTRY_KEYWORDS = [
@@ -132,35 +131,53 @@ Rules:
         'oil', 'vinegar', 'sauce', 'ketchup', 'mustard', 'jam', 'jelly',
         'pickle', 'pickled', 'dried', 'powder', 'mix', 'instant',
       ];
-      const isPantryByName = (name: string) => {
+      const isPantryByName = (name: string) =>
+        PANTRY_KEYWORDS.some(kw =>
+          new RegExp(`(?:^|\\s)${kw}(?:\\s|$)`, 'i').test(name)
+        );
+
+      // Smart shelf-life estimation for items not in reference data
+      const estimateShelfDays = (name: string): number => {
         const lower = name.toLowerCase();
-        return PANTRY_KEYWORDS.some(kw => {
-          // Match whole-word only — "rice" shouldn't match "licorice"
-          const re = new RegExp(`(?:^|\\s)${kw}(?:\\s|$)`, 'i');
-          return re.test(lower);
-        });
+        if (/yogh?urt|dairy|cheese|milk|cream/.test(lower))           return 14;
+        if (/\bmeat\b|chicken|beef|fish|salmon|tuna|pork|lamb/.test(lower)) return 3;
+        if (/vegetable|salad|lettuce|spinach|herb|kale|cabbage/.test(lower)) return 5;
+        if (/\bfruit\b|berr(y|ies)|apple|orange|grape|melon/.test(lower)) return 7;
+        if (/leftover|cooked/.test(lower))                             return 3;
+        return 7;
       };
 
       setDetectedItems(parsed.map(i => {
         const ref = findRef(i.name);
         const pantry = isPantryByName(i.name) || (ref?.fridge_days === null);
-        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? 'none'} pantry=${pantry}`);
 
-        // Pantry item: keyword in name OR reference has null fridge_days
+        let expiryDays: number;
+        let isEstimate: boolean;
+
         if (pantry) {
-          return { name: i.name, icon: i.icon ?? '🍽️', expiryDays: 365, purchaseDaysAgo: 0, storageNote: '🏠 Store outside fridge' };
+          // Shelf-stable — give a long rough estimate; user is warned by storageNote
+          expiryDays = 90;
+          isEstimate = true;
+        } else if (ref?.fridge_days != null) {
+          expiryDays = ref.fridge_days;
+          isEstimate = false;
+        } else {
+          expiryDays = estimateShelfDays(i.name);
+          isEstimate = true;
         }
-        // Unknown packaged item: not in reference and name is suspiciously long
-        if (!ref && isLongName(i.name)) {
-          return { name: i.name, icon: i.icon ?? '🍽️', expiryDays: 365, purchaseDaysAgo: 0, storageNote: '📦 Check packaging for expiry' };
-        }
+
+        console.log(
+          `[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? 'none'} ` +
+          `pantry=${pantry} expiryDays=${expiryDays} isEstimate=${isEstimate}`,
+        );
+
         return {
           name: i.name,
-          // Always use Gemini's icon — reference icon is often wrong for partial matches
           icon: i.icon ?? '🍽️',
-          // fridge_days from reference is authoritative; fall back to default only when unknown
-          expiryDays: ref?.fridge_days ?? DEFAULT_SHELF_DAYS,
+          expiryDays,
           purchaseDaysAgo: 0,
+          isEstimate,
+          storageNote: pantry ? '🏠 Store outside fridge' : undefined,
         };
       }));
       setPhase('review');
@@ -265,32 +282,32 @@ Rules:
                 <Text style={styles.removeBtn}>✕</Text>
               </TouchableOpacity>
             </View>
-            {item.storageNote ? (
+            {item.storageNote && (
               <Text style={styles.storageNoteText}>{item.storageNote}</Text>
-            ) : (
-              <View style={styles.purchaseRow}>
-                <Text style={styles.purchaseLabel}>Bought:</Text>
-                {PURCHASE_AGO.map(p => (
-                  <TouchableOpacity
-                    key={p.label}
-                    style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
-                    onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
-                  >
-                    <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
-                      {p.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {(() => {
-                  const net = item.expiryDays - item.purchaseDaysAgo;
-                  return (
-                    <Text style={styles.expiryDate}>
-                      {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
-                    </Text>
-                  );
-                })()}
-              </View>
             )}
+            <View style={styles.purchaseRow}>
+              <Text style={styles.purchaseLabel}>Bought:</Text>
+              {PURCHASE_AGO.map(p => (
+                <TouchableOpacity
+                  key={p.label}
+                  style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
+                  onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
+                >
+                  <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
+                    {p.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {(() => {
+                const net = item.expiryDays - item.purchaseDaysAgo;
+                const pre = item.isEstimate ? '~' : '';
+                return (
+                  <Text style={styles.expiryDate}>
+                    {net < 0 ? 'already expired' : net === 0 ? `${pre}expires today` : `${pre}expires ${format(addDays(new Date(), net), 'MMM d')}`}
+                  </Text>
+                );
+              })()}
+            </View>
           </View>
         ))}
 
