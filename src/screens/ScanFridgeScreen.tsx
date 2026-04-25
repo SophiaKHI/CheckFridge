@@ -124,12 +124,30 @@ Rules:
       const DEFAULT_SHELF_DAYS = 7;
       const isLongName = (s: string) => s.trim().split(/\s+/).length >= 4;
 
+      // Keywords that strongly indicate a shelf-stable / pantry item.
+      // Checked against the item name so "Canned Tuna" overrides a fresh-tuna reference match.
+      const PANTRY_KEYWORDS = [
+        'canned', 'tinned', 'crackers', 'cracker', 'chips', 'crisp', 'crisps',
+        'biscuit', 'biscuits', 'cereal', 'pasta', 'rice', 'flour', 'sugar',
+        'oil', 'vinegar', 'sauce', 'ketchup', 'mustard', 'jam', 'jelly',
+        'pickle', 'pickled', 'dried', 'powder', 'mix', 'instant',
+      ];
+      const isPantryByName = (name: string) => {
+        const lower = name.toLowerCase();
+        return PANTRY_KEYWORDS.some(kw => {
+          // Match whole-word only — "rice" shouldn't match "licorice"
+          const re = new RegExp(`(?:^|\\s)${kw}(?:\\s|$)`, 'i');
+          return re.test(lower);
+        });
+      };
+
       setDetectedItems(parsed.map(i => {
         const ref = findRef(i.name);
-        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? 'none'}`);
+        const pantry = isPantryByName(i.name) || (ref?.fridge_days === null);
+        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? 'none'} pantry=${pantry}`);
 
-        // Pantry item: found in reference but fridge_days is null
-        if (ref && ref.fridge_days === null) {
+        // Pantry item: keyword in name OR reference has null fridge_days
+        if (pantry) {
           return { name: i.name, icon: i.icon ?? '🍽️', expiryDays: 365, purchaseDaysAgo: 0, storageNote: '🏠 Store outside fridge' };
         }
         // Unknown packaged item: not in reference and name is suspiciously long
