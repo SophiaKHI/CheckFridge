@@ -48,10 +48,10 @@ export default function ScanFridgeScreen({ navigation }: any) {
       const MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash-001'];
       const prompt = `Analyze this fridge photo. List every visible food item.
 Return ONLY a raw JSON array — no markdown, no code fences, just JSON — like:
-[{"name":"Milk","icon":"🥛","daysUntilExpiry":5},{"name":"Eggs","icon":"🥚","daysUntilExpiry":14}]
+[{"name":"Milk","icon":"🥛"},{"name":"Eggs","icon":"🥚"}]
 Rules:
 - Use a single relevant food emoji for icon
-- Be conservative with expiry (err on the side of shorter)
+- Use the most specific name you can (e.g. "Cheddar Cheese" not just "Cheese")
 - Only include items you can clearly identify
 - If the fridge is empty or no food is visible, return []`;
 
@@ -90,9 +90,9 @@ Rules:
         .replace(/^```json?\n?/, '')
         .replace(/\n?```$/, '');
 
-      const parsed: Array<{ name: string; icon: string; daysUntilExpiry: number }> = JSON.parse(raw);
+      const parsed: Array<{ name: string; icon: string }> = JSON.parse(raw);
 
-      // Look up each detected item in expiry_reference for better expiry + icon
+      // Look up shelf life from expiry_reference — this is always preferred over any AI estimate
       const { data: refs } = await supabase
         .from('expiry_reference')
         .select('name, icon, fridge_days')
@@ -107,12 +107,16 @@ Rules:
         });
       };
 
+      const DEFAULT_SHELF_DAYS = 7;
+
       setDetectedItems(parsed.map(i => {
         const ref = findRef(i.name);
+        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? `none, using ${DEFAULT_SHELF_DAYS}`}`);
         return {
           name: i.name,
           icon: ref?.icon ?? i.icon ?? '🍽️',
-          expiryDays: ref?.fridge_days ?? Math.max(0, Math.round(i.daysUntilExpiry)),
+          // Always use reference shelf life; only fall back to default if item not in table
+          expiryDays: ref?.fridge_days ?? DEFAULT_SHELF_DAYS,
           purchaseDaysAgo: 0,
         };
       }));
