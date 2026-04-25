@@ -99,12 +99,25 @@ Rules:
         .not('fridge_days', 'is', null);
       const refRows = (refs ?? []) as Array<{ name: string; icon: string; fridge_days: number }>;
 
+      const firstWord = (s: string) => s.split(/\s+/).find(w => w.length >= 3) ?? '';
+
       const findRef = (itemName: string) => {
-        const needle = itemName.toLowerCase();
-        return refRows.find(r => {
+        const needle = itemName.toLowerCase().trim();
+
+        // Pass 1: exact or substring match (e.g. "Whole Milk" ↔ "Milk")
+        const p1 = refRows.find(r => {
           const hay = r.name.toLowerCase();
           return hay === needle || hay.includes(needle) || needle.includes(hay);
         });
+        if (p1) return p1;
+
+        // Pass 2: first-word match — handles spelling variants like "yoghurt" vs "yogurt"
+        // Both "Greek Yoghurt" and "Greek Yogurt" share first word "greek"
+        const nFirst = firstWord(needle);
+        if (nFirst.length >= 3) {
+          return refRows.find(r => firstWord(r.name.toLowerCase()) === nFirst);
+        }
+        return undefined;
       };
 
       const DEFAULT_SHELF_DAYS = 7;
@@ -114,8 +127,9 @@ Rules:
         console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? `none, using ${DEFAULT_SHELF_DAYS}`}`);
         return {
           name: i.name,
-          icon: ref?.icon ?? i.icon ?? '🍽️',
-          // Always use reference shelf life; only fall back to default if item not in table
+          // Always use Gemini's icon — reference icon is often wrong for partial matches
+          icon: i.icon ?? '🍽️',
+          // fridge_days from reference is authoritative; fall back to default only when unknown
           expiryDays: ref?.fridge_days ?? DEFAULT_SHELF_DAYS,
           purchaseDaysAgo: 0,
         };
