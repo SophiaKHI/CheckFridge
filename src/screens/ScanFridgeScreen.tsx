@@ -20,6 +20,8 @@ interface DetectedItem {
   icon: string;
   expiryDays: number;
   purchaseDaysAgo: number;
+  /** Set when we can't give a meaningful expiry — shows a note instead of date chips */
+  storageNote?: string;
 }
 
 type Phase = 'camera' | 'analyzing' | 'review';
@@ -92,12 +94,11 @@ Rules:
 
       const parsed: Array<{ name: string; icon: string }> = JSON.parse(raw);
 
-      // Look up shelf life from expiry_reference — this is always preferred over any AI estimate
+      // Fetch ALL reference rows — including pantry items (fridge_days = null)
       const { data: refs } = await supabase
         .from('expiry_reference')
-        .select('name, icon, fridge_days')
-        .not('fridge_days', 'is', null);
-      const refRows = (refs ?? []) as Array<{ name: string; icon: string; fridge_days: number }>;
+        .select('name, icon, fridge_days');
+      const refRows = (refs ?? []) as Array<{ name: string; icon: string; fridge_days: number | null }>;
 
       const firstWord = (s: string) => s.split(/\s+/).find(w => w.length >= 3) ?? '';
 
@@ -121,10 +122,20 @@ Rules:
       };
 
       const DEFAULT_SHELF_DAYS = 7;
+      const isLongName = (s: string) => s.trim().split(/\s+/).length >= 4;
 
       setDetectedItems(parsed.map(i => {
         const ref = findRef(i.name);
-        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? `none, using ${DEFAULT_SHELF_DAYS}`}`);
+        console.log(`[Scan] "${i.name}" → ref="${ref?.name ?? 'none'}" fridge_days=${ref?.fridge_days ?? 'none'}`);
+
+        // Pantry item: found in reference but fridge_days is null
+        if (ref && ref.fridge_days === null) {
+          return { name: i.name, icon: i.icon ?? '🍽️', expiryDays: 365, purchaseDaysAgo: 0, storageNote: '🏠 Store outside fridge' };
+        }
+        // Unknown packaged item: not in reference and name is suspiciously long
+        if (!ref && isLongName(i.name)) {
+          return { name: i.name, icon: i.icon ?? '🍽️', expiryDays: 365, purchaseDaysAgo: 0, storageNote: '📦 Check packaging for expiry' };
+        }
         return {
           name: i.name,
           // Always use Gemini's icon — reference icon is often wrong for partial matches
@@ -236,28 +247,32 @@ Rules:
                 <Text style={styles.removeBtn}>✕</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.purchaseRow}>
-              <Text style={styles.purchaseLabel}>Bought:</Text>
-              {PURCHASE_AGO.map(p => (
-                <TouchableOpacity
-                  key={p.label}
-                  style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
-                  onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
-                >
-                  <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
-                    {p.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {(() => {
-                const net = item.expiryDays - item.purchaseDaysAgo;
-                return (
-                  <Text style={styles.expiryDate}>
-                    {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
-                  </Text>
-                );
-              })()}
-            </View>
+            {item.storageNote ? (
+              <Text style={styles.storageNoteText}>{item.storageNote}</Text>
+            ) : (
+              <View style={styles.purchaseRow}>
+                <Text style={styles.purchaseLabel}>Bought:</Text>
+                {PURCHASE_AGO.map(p => (
+                  <TouchableOpacity
+                    key={p.label}
+                    style={[styles.expiryChip, item.purchaseDaysAgo === p.days && styles.expiryChipActive]}
+                    onPress={() => updateItem(index, { purchaseDaysAgo: p.days })}
+                  >
+                    <Text style={[styles.expiryChipText, item.purchaseDaysAgo === p.days && styles.expiryChipTextActive]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {(() => {
+                  const net = item.expiryDays - item.purchaseDaysAgo;
+                  return (
+                    <Text style={styles.expiryDate}>
+                      {net < 0 ? 'already expired' : net === 0 ? 'expires today' : `expires ${format(addDays(new Date(), net), 'MMM d')}`}
+                    </Text>
+                  );
+                })()}
+              </View>
+            )}
           </View>
         ))}
 
@@ -359,4 +374,5 @@ const styles = StyleSheet.create({
   addAllBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   purchaseRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 6 },
   purchaseLabel: { fontSize: 11, color: '#aaa' },
+  storageNoteText: { fontSize: 12, color: '#888', marginTop: 6 },
 });
