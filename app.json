@@ -29,7 +29,8 @@
           "icon": "./assets/notification-icon.png",
           "color": "#1D9E75"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "scheme": "checkfridge"
   }
