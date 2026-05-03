@@ -4,7 +4,7 @@ import {
   Dimensions, Animated, PanResponder, Image, Easing,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { format, addDays, parseISO } from 'date-fns';
+import { format, addDays, parseISO, differenceInDays } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
 import { daysLeft, getExpiryStyle, dayLabel, urgency } from '../lib/expiry';
 import { isOpenable, getOpenedDays } from '../lib/openedShelfLife';
@@ -33,6 +33,51 @@ function sourceForScale(scale: number) {
   if (scale === 0) return IGGO_NEUTRAL;
   if (scale > 0) return IGGO_HAPPY[Math.min(scale - 1, 3)];
   return IGGO_SAD[Math.min(-scale - 1, 3)];
+}
+
+// ─── Spoilage tips ────────────────────────────────────────────────────────────
+
+const SPOILAGE_PATTERNS: Array<[RegExp, string]> = [
+  [/\bmilk\b/i,               'Smells sour or has visible lumps'],
+  [/yogh?urt/i,               'Mold on surface, off smell, or watery separation'],
+  [/\beggs?\b/i,              'Floats in water, or smells sulphuric when cracked'],
+  [/chicken|poultry/i,        'Slimy texture, grey color, or sour smell'],
+  [/ground beef|mince/i,      'Grey/brown throughout, slimy, or sour smell'],
+  [/\bbeef\b|steak/i,         'Brown-grey color, slimy surface, or off smell'],
+  [/salmon|fish|tuna|shrimp/i,'Milky residue, very dull color, or strong fishy smell'],
+  [/cream cheese/i,           'Pink discoloration, mold, or very sour smell'],
+  [/sour cream/i,             'Pink streaks, mold, or watery separation with off smell'],
+  [/\bcheese\b/i,             'Unexpected mold (not natural rind) or slimy surface'],
+  [/heavy cream|whipping cream/i, 'Sour smell, thickened/curdled texture'],
+  [/\bcream\b/i,              'Sour smell or curdled texture'],
+  [/hummus/i,                 'Pink or orange spots, mold, or sour smell'],
+  [/lettuce|salad/i,          'Slimy leaves, brown edges, or off smell'],
+  [/spinach|kale/i,           'Slimy dark patches or ammonia-like smell'],
+  [/\bavocado\b/i,            'Brown stringy flesh inside or mold on skin'],
+  [/strawberr/i,              'Fuzzy mould, very mushy spots, or fermented smell'],
+  [/\bberr/i,                 'Fuzzy mould (usually grey/white) or very soft and leaking'],
+  [/\bbread\b/i,              'Any fuzzy mould — discard the whole loaf, not just the slice'],
+  [/\bbutter\b/i,             'Yellow darkening on surface, or rancid/soapy smell'],
+  [/juice\b/i,                'Fizzing, fermented smell, or unusual cloudiness'],
+  [/bacon|ham\b/i,            'Slimy texture, sour smell, or grey-green color'],
+  [/sausage|hot dog/i,        'Slimy casing, off smell, or dull grey color'],
+  [/pork\b/i,                 'Slimy, sour smell, or color change to grey'],
+  [/\blamb\b/i,               'Slimy texture, strong off smell, or unusual color'],
+  [/mushroom/i,               'Slimy cap, dark wet spots, or strong ammonia smell'],
+  [/broccoli|cauliflower/i,   'Yellow or brown florets, strong odour, or slimy stems'],
+  [/\bcarrot\b/i,             'Slimy texture or mushy/hollow center (white haze is ok if rinsed)'],
+  [/tomato/i,                 'Visible mold, very soft and leaking, or fermented smell'],
+  [/pepper\b/i,               'Mold, very wrinkled/soft skin, or off smell'],
+  [/leftover|cooked/i,        'Off smell, slimy texture, or visible mold'],
+];
+
+const GENERIC_SPOILAGE_TIP = 'Check for unusual smell, color changes, or visible mold';
+
+function getSpoilageTip(name: string): string {
+  for (const [re, tip] of SPOILAGE_PATTERNS) {
+    if (re.test(name)) return tip;
+  }
+  return GENERIC_SPOILAGE_TIP;
 }
 
 // ─── Bubble layout ────────────────────────────────────────────────────────────
@@ -321,19 +366,20 @@ export default function FridgeScreen({ navigation }: any) {
     return expiredN > 0 ? -3 : expiringN > 0 ? 0 : 1;
   }, [activeItems]);
 
-  // Thought bubble — shows all urgent/non-fresh categories
+  // Status badge — shows all urgent categories as separate segments to prevent mid-item line breaks
   const thoughtBubble = useMemo(() => {
     if (activeItems.length === 0) return null;
-    const parts: string[] = [];
-    if (expiredCount  > 0) parts.push(`${expiredCount} expired 🔴`);
-    if (useTodayCount > 0) parts.push(`${useTodayCount} use today 🔴`);
-    if (expiringCount > 0) parts.push(`${expiringCount} expiring 🟠`);
-    if (useSoonCount  > 0) parts.push(`${useSoonCount} use soon 🟡`);
-    if (parts.length  > 0) {
-      const color = (expiredCount > 0 || useTodayCount > 0) ? '#E57373' : expiringCount > 0 ? '#D85A30' : '#F59E0B';
-      return { text: parts.join(' · '), color };
+    const segments: Array<{ text: string; color: string }> = [];
+    if (expiredCount  > 0) segments.push({ text: `${expiredCount} expired 🔴`,   color: '#E57373' });
+    if (useTodayCount > 0) segments.push({ text: `${useTodayCount} use today 🔴`, color: '#E57373' });
+    if (expiringCount > 0) segments.push({ text: `${expiringCount} expiring 🟠`,  color: '#D85A30' });
+    if (useSoonCount  > 0) segments.push({ text: `${useSoonCount} use soon 🟡`,   color: '#F59E0B' });
+    if (segments.length > 0) {
+      const borderColor = (expiredCount > 0 || useTodayCount > 0) ? '#E57373'
+        : expiringCount > 0 ? '#D85A30' : '#F59E0B';
+      return { segments, borderColor };
     }
-    return { text: 'All fresh! 🟢', color: '#1D9E75' };
+    return { segments: [{ text: 'All fresh! 🟢', color: '#1D9E75' }], borderColor: '#1D9E75' };
   }, [activeItems.length, expiredCount, useTodayCount, expiringCount, useSoonCount]);
 
   // Measured by onLayout so bubbles always fill the actual rendered canvas
@@ -376,7 +422,7 @@ export default function FridgeScreen({ navigation }: any) {
   const usedAnim  = useRef(new Animated.Value(0)).current;
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [openModal, setOpenModal] = useState<{ item: FridgeItem; openedDays: number } | null>(null);
+  const [openModal, setOpenModal] = useState<FridgeItem | null>(null);
 
   const handleDragStart = useCallback((id: string) => setDraggingId(id), []);
   const handleDragMove = (overTrash: boolean, overUsed: boolean) => {
@@ -466,8 +512,9 @@ export default function FridgeScreen({ navigation }: any) {
 
   const handleMarkOpened = useCallback(async () => {
     if (!openModal) return;
-    const { item, openedDays } = openModal;
-    await updateItem(item.id, { expiry_date: format(addDays(new Date(), openedDays), 'yyyy-MM-dd') });
+    const od = getOpenedDays(openModal.name);
+    if (od == null) return;
+    await updateItem(openModal.id, { expiry_date: format(addDays(new Date(), od), 'yyyy-MM-dd') });
     setOpenModal(null);
   }, [openModal, updateItem]);
 
@@ -515,12 +562,17 @@ export default function FridgeScreen({ navigation }: any) {
             ))}
           </View>
 
-          {/* Status badge — simple pill showing fridge state */}
+          {/* Status badge — each segment in its own container so lines never break mid-item */}
           {thoughtBubble && (
-            <View style={[styles.statusBadge, { borderColor: thoughtBubble.color }]}>
-              <Text style={[styles.statusBadgeText, { color: thoughtBubble.color }]}>
-                {thoughtBubble.text}
-              </Text>
+            <View style={[styles.statusBadge, { borderColor: thoughtBubble.borderColor }]}>
+              <View style={styles.statusBadgeInner}>
+                {thoughtBubble.segments.map((seg, i) => (
+                  <View key={seg.text} style={styles.statusSegment}>
+                    {i > 0 && <Text style={styles.statusDot}> · </Text>}
+                    <Text style={[styles.statusBadgeText, { color: seg.color }]}>{seg.text}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
           )}
         </View>
@@ -576,10 +628,7 @@ export default function FridgeScreen({ navigation }: any) {
                     onDragStart={handleDragStart}
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
-                    onLongPress={() => {
-                      const od = getOpenedDays(item.name);
-                      if (od != null) setOpenModal({ item, openedDays: od });
-                    }}
+                    onLongPress={() => setOpenModal(item)}
                   />
                 </Animated.View>
               );
@@ -650,7 +699,7 @@ export default function FridgeScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Opened-expiry modal */}
+      {/* Item info modal — long press on any bubble */}
       <Modal
         visible={openModal !== null}
         transparent
@@ -661,24 +710,70 @@ export default function FridgeScreen({ navigation }: any) {
           <View style={styles.modalBackdrop}>
             <TouchableWithoutFeedback>
               <View style={styles.modalCard}>
-                <Text style={styles.modalIcon}>{openModal?.item.icon}</Text>
-                <Text style={styles.modalName}>{openModal?.item.name}</Text>
-                <Text style={styles.modalCurrentExpiry}>
-                  Currently expires {openModal ? format(parseISO(openModal.item.expiry_date), 'MMM d') : ''}
-                </Text>
-                <View style={styles.modalDivider} />
-                <Text style={styles.modalOpenedNote}>
-                  Once opened, lasts ~{openModal?.openedDays} days from today
-                </Text>
-                <Text style={styles.modalNewExpiry}>
-                  New expiry: {openModal ? format(addDays(new Date(), openModal.openedDays), 'MMM d') : ''}
-                </Text>
-                <TouchableOpacity style={styles.modalBtn} onPress={handleMarkOpened}>
-                  <Text style={styles.modalBtnText}>Mark as opened</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setOpenModal(null)} hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}>
-                  <Text style={styles.modalCancel}>Cancel</Text>
-                </TouchableOpacity>
+                {(() => {
+                  if (!openModal) return null;
+                  const days = daysLeft(openModal.expiry_date);
+                  const exStyle = getExpiryStyle(days);
+                  const daysInFridge = differenceInDays(new Date(), parseISO(openModal.added_at));
+                  const inFridgeText = daysInFridge === 0 ? 'Added today'
+                    : `In your fridge for ${daysInFridge} day${daysInFridge !== 1 ? 's' : ''}`;
+                  const expiryText = days < 0
+                    ? `Expired ${Math.abs(days)} day${Math.abs(days) !== 1 ? 's' : ''} ago`
+                    : days === 0 ? 'Use today!'
+                    : days === 1 ? 'Expires tomorrow'
+                    : `Expires in ${days} days`;
+                  const od = getOpenedDays(openModal.name);
+                  const spoilageTip = getSpoilageTip(openModal.name);
+                  return (
+                    <>
+                      {/* Header */}
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalIcon}>{openModal.icon}</Text>
+                        <View style={styles.modalHeaderText}>
+                          <Text style={styles.modalName}>{openModal.name}</Text>
+                          <View style={[styles.modalExpiryPill, { backgroundColor: exStyle.bg, borderColor: exStyle.border }]}>
+                            <Text style={[styles.modalExpiryPillText, { color: exStyle.text }]}>{expiryText}</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.modalDivider} />
+
+                      {/* In fridge duration */}
+                      <View style={styles.modalRow}>
+                        <Text style={styles.modalRowIcon}>📦</Text>
+                        <Text style={styles.modalRowText}>{inFridgeText}</Text>
+                      </View>
+
+                      {/* Spoilage tip */}
+                      <View style={styles.modalRow}>
+                        <Text style={styles.modalRowIcon}>🔍</Text>
+                        <Text style={styles.modalRowText}>{spoilageTip}</Text>
+                      </View>
+
+                      {/* Mark as opened — only for openable items */}
+                      {od != null && (
+                        <>
+                          <View style={styles.modalDivider} />
+                          <Text style={styles.modalOpenedNote}>
+                            Once opened, lasts ~{od} days → new expiry {format(addDays(new Date(), od), 'MMM d')}
+                          </Text>
+                          <TouchableOpacity style={styles.modalBtn} onPress={handleMarkOpened}>
+                            <Text style={styles.modalBtnText}>Mark as opened</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+
+                      <TouchableOpacity
+                        style={[styles.modalDoneBtn, od == null && { marginTop: 20 }]}
+                        onPress={() => setOpenModal(null)}
+                        hitSlop={{ top: 8, bottom: 8, left: 24, right: 24 }}
+                      >
+                        <Text style={styles.modalDoneBtnText}>Done</Text>
+                      </TouchableOpacity>
+                    </>
+                  );
+                })()}
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -756,6 +851,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: 'rgba(0,0,0,0.03)',
   },
+  statusBadgeInner: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  // Each segment wraps as a unit — the row never breaks inside a single "3 expiring 🟠" label
+  statusSegment: { flexDirection: 'row', alignItems: 'center' },
+  statusDot: { fontSize: 14, color: '#bbb' },
   statusBadgeText: { fontSize: 14, fontWeight: '600' },
   iggoContainer: {
     // Normal flex child in legendRow — frames are position:absolute inside
@@ -805,25 +908,34 @@ const styles = StyleSheet.create({
   toastUndo: { color: '#4ADE80', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
   modalBackdrop: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center', alignItems: 'center', padding: 32,
+    justifyContent: 'center', alignItems: 'center', padding: 28,
   },
   modalCard: {
-    backgroundColor: '#fff', borderRadius: 20, padding: 24,
-    alignItems: 'center', width: '100%',
+    backgroundColor: '#fff', borderRadius: 20, padding: 22,
+    width: '100%',
     shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
     elevation: 12,
   },
-  modalIcon: { fontSize: 40, marginBottom: 8 },
-  modalName: { fontSize: 18, fontWeight: '700', color: '#111', marginBottom: 4, textAlign: 'center' },
-  modalCurrentExpiry: { fontSize: 13, color: '#aaa', marginBottom: 16 },
-  modalDivider: { width: '100%', height: 1, backgroundColor: '#f0f0f0', marginBottom: 16 },
-  modalOpenedNote: { fontSize: 13, color: '#888', marginBottom: 4, textAlign: 'center' },
-  modalNewExpiry: { fontSize: 15, fontWeight: '600', color: '#1D9E75', marginBottom: 20 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  modalIcon: { fontSize: 42 },
+  modalHeaderText: { flex: 1, gap: 6 },
+  modalName: { fontSize: 18, fontWeight: '700', color: '#111' },
+  modalExpiryPill: {
+    alignSelf: 'flex-start', borderRadius: 12, borderWidth: 1,
+    paddingHorizontal: 10, paddingVertical: 3,
+  },
+  modalExpiryPillText: { fontSize: 13, fontWeight: '600' },
+  modalDivider: { width: '100%', height: 1, backgroundColor: '#f0f0f0', marginBottom: 14 },
+  modalRow: { flexDirection: 'row', gap: 10, marginBottom: 12, alignItems: 'flex-start' },
+  modalRowIcon: { fontSize: 16, marginTop: 1 },
+  modalRowText: { flex: 1, fontSize: 14, color: '#444', lineHeight: 20 },
+  modalOpenedNote: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 12 },
   modalBtn: {
     backgroundColor: '#1D9E75', borderRadius: 12,
-    paddingVertical: 13, paddingHorizontal: 32,
-    width: '100%', alignItems: 'center', marginBottom: 12,
+    paddingVertical: 13,
+    width: '100%', alignItems: 'center', marginBottom: 10,
   },
   modalBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  modalCancel: { fontSize: 14, color: '#aaa', fontWeight: '500' },
+  modalDoneBtn: { alignItems: 'center', paddingVertical: 6 },
+  modalDoneBtnText: { fontSize: 14, color: '#aaa', fontWeight: '500' },
 });
