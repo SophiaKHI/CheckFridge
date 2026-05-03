@@ -1,0 +1,203 @@
+name,category,icon,fridge_days,freezer_days,pantry_days
+Milk,dairy,🥛,7,90,
+Whole milk,dairy,🥛,7,90,
+Skim milk,dairy,🥛,7,90,
+Heavy cream,dairy,🥛,10,120,
+Half and half,dairy,🥛,7,120,
+Buttermilk,dairy,🥛,14,90,
+Sour cream,dairy,🥛,21,180,
+Yogurt,dairy,🫙,14,60,
+Greek yogurt,dairy,🫙,14,60,
+Cottage cheese,dairy,🧀,7,90,
+Ricotta,dairy,🧀,7,60,
+Cream cheese,dairy,🧀,14,60,
+Cheddar,dairy,🧀,28,180,
+Parmesan,dairy,🧀,60,365,
+Gouda,dairy,🧀,28,180,
+Swiss cheese,dairy,🧀,28,180,
+Mozzarella,dairy,🧀,21,180,
+Pepper jack,dairy,🧀,28,180,
+Brie,dairy,🧀,14,180,
+Camembert,dairy,🧀,14,180,
+Feta,dairy,🧀,21,90,
+Goat cheese,dairy,🧀,14,180,
+Blue cheese,dairy,🧀,28,180,
+Butter,dairy,🧈,60,270,
+Unsalted butter,dairy,🧈,30,270,
+Ghee,dairy,🧈,90,365,
+Kefir,dairy,🥛,14,60,
+Ice cream,dairy,🍨,,60,
+Eggs,dairy,🥚,28,,
+Egg whites,dairy,🥚,4,365,
+Hard boiled eggs,dairy,🥚,7,,
+Chicken breast,meat,🍗,2,270,
+Chicken thighs,meat,🍗,2,270,
+Whole chicken,meat,🍗,2,365,
+Ground beef,meat,🥩,2,120,
+Steak,meat,🥩,4,365,
+Ribeye,meat,🥩,4,365,
+Pork chops,meat,🥩,4,180,
+Pork loin,meat,🥩,4,180,
+Ground pork,meat,🥩,2,120,
+Bacon,meat,🥓,7,30,
+Sausage,meat,🌭,2,60,
+Cooked sausage,meat,🌭,7,90,
+Ground turkey,meat,🍗,2,120,
+Turkey breast,meat,🦃,4,270,
+Lamb,meat,🥩,4,270,
+Duck,meat,🦆,2,180,
+Hot dogs,meat,🌭,7,60,
+Salmon,seafood,🐟,2,90,
+Tuna,seafood,🐟,2,90,
+Cod,seafood,🐟,2,240,
+Tilapia,seafood,🐟,2,180,
+Shrimp,seafood,🦐,2,180,
+Scallops,seafood,🦪,2,90,
+Mussels,seafood,🦪,2,90,
+Clams,seafood,🦪,2,90,
+Oysters,seafood,🦪,2,90,
+Smoked salmon,seafood,🐟,14,60,
+Crab,seafood,🦀,3,90,
+Lobster,seafood,🦞,2,90,
+Deli ham,deli,🥩,5,60,
+Deli turkey,deli,🥩,5,60,
+Salami,deli,🥩,21,90,
+Pepperoni,deli,🥩,21,90,
+Prosciutto,deli,🥩,60,60,
+Pastrami,deli,🥩,5,60,
+Chorizo,deli,🥩,14,90,
+Spinach,produce,🥬,5,240,
+Kale,produce,🥬,7,240,
+Arugula,produce,🥬,5,,
+Romaine,produce,🥬,7,,
+Iceberg lettuce,produce,🥬,10,,
+Mixed greens,produce,🥗,5,,
+Broccoli,produce,🥦,7,365,
+Cauliflower,produce,🥦,7,365,
+Cabbage,produce,🥬,14,365,
+Brussels sprouts,produce,🥬,10,365,
+Carrots,produce,🥕,21,365,
+Celery,produce,🥬,14,300,
+Bell pepper,produce,🫑,10,300,
+Cucumber,produce,🥒,7,,
+Zucchini,produce,🥒,7,300,
+Yellow squash,produce,🥒,7,300,
+Eggplant,produce,🍆,7,240,
+Tomatoes,produce,🍅,7,240,5
+Cherry tomatoes,produce,🍅,7,,5
+Mushrooms,produce,🍄,7,240,
+Green beans,produce,🥬,7,240,
+Asparagus,produce,🥬,4,240,
+Onion,produce,🧅,,270,30
+Red onion,produce,🧅,,270,30
+Garlic,produce,🧄,,,60
+Ginger,produce,🫚,21,180,
+Scallions,produce,🌿,7,,
+Leeks,produce,🥬,10,,
+Shallots,produce,🧅,,270,30
+Corn,produce,🌽,3,240,
+Peas,produce,🟢,4,300,
+Snow peas,produce,🟢,5,300,
+Radishes,produce,🫒,14,,
+Beets,produce,🫒,21,300,
+Potatoes,produce,🥔,,300,30
+Sweet potatoes,produce,🍠,,,21
+Avocado,produce,🥑,5,,5
+Apples,produce,🍎,30,240,7
+Bananas,produce,🍌,7,90,5
+Oranges,produce,🍊,21,,7
+Lemons,produce,🍋,28,120,7
+Limes,produce,🍋‍🟩,28,120,7
+Grapefruit,produce,🍊,21,,7
+Strawberries,produce,🍓,5,240,
+Blueberries,produce,🫐,10,365,
+Raspberries,produce,🍓,3,365,
+Blackberries,produce,🫐,5,365,
+Grapes,produce,🍇,14,300,
+Pineapple,produce,🍍,5,365,3
+Mango,produce,🥭,7,240,5
+Kiwi,produce,🥝,14,240,
+Peaches,produce,🍑,5,240,3
+Plums,produce,🍑,5,240,3
+Cherries,produce,🍒,7,365,
+Watermelon,produce,🍉,7,,5
+Cantaloupe,produce,🍈,7,,5
+Honeydew,produce,🍈,7,,5
+Pears,produce,🍐,7,240,5
+Basil,herbs,🌿,7,180,
+Cilantro,herbs,🌿,7,180,
+Parsley,herbs,🌿,10,180,
+Dill,herbs,🌿,7,180,
+Mint,herbs,🌿,7,180,
+Thyme,herbs,🌿,14,180,
+Rosemary,herbs,🌿,14,180,
+Sage,herbs,🌿,14,180,
+Chives,herbs,🌿,7,180,
+Oregano,herbs,🌿,14,180,
+Leftovers,prepared,🍱,4,90,
+Cooked rice,prepared,🍚,5,180,
+Cooked pasta,prepared,🍝,5,60,
+Cooked chicken,prepared,🍗,4,120,
+Cooked beef,prepared,🍖,4,90,
+Cooked fish,prepared,🐟,3,90,
+Soup,prepared,🍲,4,90,
+Stew,prepared,🍲,4,90,
+Salad with dressing,prepared,🥗,2,,
+Pizza,prepared,🍕,4,60,
+Sandwich,prepared,🥪,2,,
+Sushi,prepared,🍣,1,,
+Pasta sauce,prepared,🍝,7,180,
+Ketchup,condiments,🍅,180,,
+Mayonnaise,condiments,🥚,60,,
+Mustard,condiments,🌭,365,,
+Soy sauce,condiments,🥢,365,,
+Hot sauce,condiments,🌶️,365,,
+Salsa,condiments,🍅,14,,
+Pesto,condiments,🌿,7,180,
+Jam,condiments,🍓,365,,
+Jelly,condiments,🫐,365,,
+Peanut butter,condiments,🥜,90,,365
+Almond butter,condiments,🥜,90,,180
+Tahini,condiments,🌾,180,,
+Maple syrup,condiments,🍁,365,,
+Honey,condiments,🍯,,,1825
+Coconut milk,condiments,🥥,5,,
+Olives,condiments,🫒,14,,
+Pickles,condiments,🥒,90,,
+Relish,condiments,🥒,180,,
+Horseradish,condiments,🌶️,120,,
+Sriracha,condiments,🌶️,365,,
+Bread,bakery,🍞,7,90,5
+White bread,bakery,🍞,7,90,5
+Wheat bread,bakery,🍞,7,90,5
+Sourdough,bakery,🍞,5,90,4
+Bagels,bakery,🥯,7,120,5
+Flour tortillas,bakery,🫓,21,180,7
+Corn tortillas,bakery,🫓,10,180,
+Pita,bakery,🫓,7,180,5
+English muffins,bakery,🥯,10,90,7
+Croissants,bakery,🥐,3,60,2
+Muffins,bakery,🧁,5,90,3
+Cake,bakery,🎂,5,120,
+Pie,bakery,🥧,4,120,
+Cookies,bakery,🍪,14,90,14
+Donuts,bakery,🍩,2,60,1
+Tofu,plant,🥡,7,150,
+Tempeh,plant,🥡,10,180,
+Seitan,plant,🥡,7,180,
+Almond milk,plant,🥛,10,,
+Oat milk,plant,🥛,10,,
+Soy milk,plant,🥛,10,,
+Coconut yogurt,plant,🫙,10,60,
+Hummus,plant,🫘,7,120,
+Guacamole,plant,🥑,3,,
+Edamame,plant,🫛,5,365,
+Orange juice,drinks,🧃,10,,
+Apple juice,drinks,🧃,10,,
+Lemonade,drinks,🍋,7,,
+Iced tea,drinks,🍵,5,,
+Kombucha,drinks,🫖,30,,
+Cold brew coffee,drinks,☕,14,,
+Wine,drinks,🍷,5,,
+Beer,drinks,🍺,1,,
+Champagne,drinks,🍾,3,,
