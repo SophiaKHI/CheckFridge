@@ -32,6 +32,18 @@
       ],
       "@react-native-community/datetimepicker"
     ],
-    "scheme": "checkfridge"
+    "scheme": "checkfridge",
+    "extra": {
+      "eas": {
+        "projectId": "0b6a823a-9894-461b-8a76-8eef856247e1"
+      }
+    },
+    "owner": "annabananasky",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0b6a823a-9894-461b-8a76-8eef856247e1"
+    }
   }
 }
