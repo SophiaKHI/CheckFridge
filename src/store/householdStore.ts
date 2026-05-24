@@ -40,7 +40,7 @@ interface HouseholdState {
   createHousehold: (name: string) => Promise<string | null>;
   createInvite: (invitedEmail: string) => Promise<{ link: string } | { error: string }>;
   leaveHousehold: () => Promise<string | null>;
-  acceptInvite: (token: string) => Promise<string | null>;
+  acceptInvite: (token: string) => Promise<{ error: string } | { householdName: string }>;
 }
 
 export const useHouseholdStore = create<HouseholdState>((set, get) => ({
@@ -163,10 +163,10 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
       body: { token },
     });
 
-    if (error) return error.message;
-    if (data?.error) return data.error;
+    if (error) return { error: error.message };
+    if (data?.error) return { error: data.error };
 
     await get().fetchHousehold();
-    return null;
+    return { householdName: data?.household_name ?? get().householdName ?? 'the household' };
   },
 }));

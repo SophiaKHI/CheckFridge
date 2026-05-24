@@ -48,10 +48,14 @@ export default function HouseholdScreen() {
     const token = joinToken.trim();
     if (!token) return;
     setLoading(true);
-    const err = await acceptInvite(token);
+    const result = await acceptInvite(token);
     setLoading(false);
-    if (err) Alert.alert('Could not join', err);
-    else { setJoinToken(''); Alert.alert('Joined!', `Welcome to ${householdName ?? 'the household'}.`); }
+    if ('error' in result) {
+      Alert.alert('Could not join', result.error);
+    } else {
+      setJoinToken('');
+      Alert.alert('Joined!', `Welcome to ${result.householdName}.`);
+    }
   };
 
   const handleLeave = () => {

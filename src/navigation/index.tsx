@@ -107,9 +107,9 @@ export default function AppNavigator() {
         { text: 'Decline', style: 'cancel' },
         {
           text: 'Accept', onPress: async () => {
-            const err = await acceptInvite(token);
-            if (err) Alert.alert('Could not join', err);
-            else Alert.alert('Joined!', 'You are now part of the household.');
+            const result = await acceptInvite(token);
+            if ('error' in result) Alert.alert('Could not join', result.error);
+            else Alert.alert('Joined!', `Welcome to ${result.householdName}.`);
           },
         },
       ],
