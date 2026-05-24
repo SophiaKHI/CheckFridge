@@ -1,22 +1,28 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 
-// Soft palette — chosen to not clash with expiry colors (green/yellow/orange/red)
 const MEMBER_COLORS = [
-  '#5B8AF0', // blue
-  '#A55BF0', // purple
-  '#F05BA0', // pink
-  '#F0B35B', // amber
-  '#5BC4F0', // sky
+  '#5B8AF0',
+  '#A55BF0',
+  '#F05BA0',
+  '#F0B35B',
+  '#5BC4F0',
 ];
 
 function getInitials(email: string): string {
-  const local = email.split('@')[0];          // 'anna.klinker'
-  const parts = local.split(/[._\-+]/);       // ['anna', 'klinker']
+  const local = email.split('@')[0];
+  const parts = local.split(/[._\-+]/);
   if (parts.length >= 2 && parts[0] && parts[1]) {
-    return (parts[0][0] + parts[1][0]).toUpperCase(); // 'AK'
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
-  return local.slice(0, 2).toUpperCase();     // 'AN' for single-word emails
+  return local.slice(0, 2).toUpperCase();
+}
+
+function generateToken(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
 export interface MemberInfo {
@@ -27,43 +33,48 @@ export interface MemberInfo {
 }
 
 interface HouseholdState {
-  /** Empty array = solo user (not in a household) */
   members: MemberInfo[];
   householdId: string | null;
+  householdName: string | null;
   fetchHousehold: () => Promise<void>;
+  createHousehold: (name: string) => Promise<string | null>;
+  createInvite: (invitedEmail: string) => Promise<{ link: string } | { error: string }>;
+  leaveHousehold: () => Promise<string | null>;
+  acceptInvite: (token: string) => Promise<string | null>;
 }
 
-export const useHouseholdStore = create<HouseholdState>((set) => ({
+export const useHouseholdStore = create<HouseholdState>((set, get) => ({
   members: [],
   householdId: null,
+  householdName: null,
 
   fetchHousehold: async () => {
-    // 1. Check if current user is in any household
     const { data: myMembership } = await supabase
       .from('household_members')
       .select('household_id')
       .maybeSingle();
 
     if (!myMembership) {
-      set({ members: [], householdId: null });
+      set({ members: [], householdId: null, householdName: null });
       return;
     }
 
     const householdId = myMembership.household_id as string;
 
-    // 2. Fetch all members of that household, sorted by join date (owner first)
-    const { data: memberRows } = await supabase
-      .from('household_members')
-      .select('user_id, joined_at')
-      .eq('household_id', householdId)
-      .order('joined_at', { ascending: true });
+    const [{ data: household }, { data: memberRows }] = await Promise.all([
+      supabase.from('households').select('name').eq('id', householdId).single(),
+      supabase
+        .from('household_members')
+        .select('user_id, joined_at')
+        .eq('household_id', householdId)
+        .order('joined_at', { ascending: true }),
+    ]);
 
     if (!memberRows || memberRows.length === 0) {
-      set({ members: [], householdId });
+      set({ members: [], householdId, householdName: household?.name ?? null });
       return;
     }
 
-    // 3. Fetch their profiles to get emails for initials
     const userIds = memberRows.map((m: any) => m.user_id);
     const { data: profileRows } = await supabase
       .from('profiles')
@@ -73,7 +84,6 @@ export const useHouseholdStore = create<HouseholdState>((set) => ({
     const profileMap: Record<string, string> = {};
     (profileRows ?? []).forEach((p: any) => { profileMap[p.user_id] = p.email; });
 
-    // 4. Build MemberInfo — color assigned by join order
     const members: MemberInfo[] = memberRows.map((m: any, i: number) => {
       const email = profileMap[m.user_id] ?? '';
       return {
@@ -84,6 +94,79 @@ export const useHouseholdStore = create<HouseholdState>((set) => ({
       };
     });
 
-    set({ members, householdId });
+    set({ members, householdId, householdName: household?.name ?? null });
+  },
+
+  createHousehold: async (name: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return 'Not signed in';
+
+    const { data: household, error: hErr } = await supabase
+      .from('households')
+      .insert({ name, owner_id: user.id })
+      .select('id')
+      .single();
+
+    if (hErr || !household) return hErr?.message ?? 'Failed to create household';
+
+    const { error: mErr } = await supabase
+      .from('household_members')
+      .insert({ household_id: household.id, user_id: user.id, role: 'owner' });
+
+    if (mErr) return mErr.message;
+
+    await get().fetchHousehold();
+    return null;
+  },
+
+  createInvite: async (invitedEmail: string) => {
+    const { householdId } = get();
+    if (!householdId) return { error: 'Not in a household' };
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'Not signed in' };
+
+    const token = generateToken();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { error } = await supabase.from('household_invites').insert({
+      household_id: householdId,
+      invited_by: user.id,
+      invited_email: invitedEmail,
+      token,
+      status: 'pending',
+      expires_at: expiresAt,
+    });
+
+    if (error) return { error: error.message };
+
+    return { link: `checkfridge://accept-invite?token=${token}` };
+  },
+
+  leaveHousehold: async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return 'Not signed in';
+
+    const { error } = await supabase
+      .from('household_members')
+      .delete()
+      .eq('user_id', user.id);
+
+    if (error) return error.message;
+
+    set({ members: [], householdId: null, householdName: null });
+    return null;
+  },
+
+  acceptInvite: async (token: string) => {
+    const { data, error } = await supabase.functions.invoke('accept-invite', {
+      body: { token },
+    });
+
+    if (error) return error.message;
+    if (data?.error) return data.error;
+
+    await get().fetchHousehold();
+    return null;
   },
 }));

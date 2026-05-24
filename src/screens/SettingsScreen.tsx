@@ -3,11 +3,13 @@ import {
   View, Text, StyleSheet, Switch, TouchableOpacity, Alert,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
+import { useHouseholdStore } from '../store/householdStore';
 import * as Notifications from 'expo-notifications';
 
-export default function SettingsScreen() {
+export default function SettingsScreen({ navigation }: any) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const { signOut, session } = useAuthStore();
+  const { householdName } = useHouseholdStore();
 
   const toggleNotifications = async (value: boolean) => {
     if (value) {
@@ -36,6 +38,15 @@ export default function SettingsScreen() {
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Signed in as</Text>
           <Text style={styles.rowValue}>{session?.user?.email ?? '—'}</Text>
+        </View>
+        <View style={[styles.row, { marginTop: 12 }]}>
+          <View>
+            <Text style={styles.rowLabel}>Household</Text>
+            <Text style={styles.rowSub}>{householdName ?? 'Solo'}</Text>
+          </View>
+          <TouchableOpacity onPress={() => navigation.navigate('Household')}>
+            <Text style={styles.rowLink}>Manage</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -77,6 +88,7 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: 15, color: '#111' },
   rowSub: { fontSize: 12, color: '#aaa', marginTop: 2 },
   rowValue: { fontSize: 13, color: '#888' },
+  rowLink: { fontSize: 13, color: '#1D9E75', fontWeight: '600' },
   signOutBtn: { alignItems: 'center', paddingVertical: 4 },
   signOutText: { fontSize: 15, color: '#E24B4A', fontWeight: '500' },
   version: { textAlign: 'center', fontSize: 12, color: '#ccc', marginTop: 'auto', paddingBottom: 20 },
