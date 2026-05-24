@@ -6,6 +6,8 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { format, addDays, parseISO, differenceInDays } from 'date-fns';
 import { useFridgeStore } from '../store/fridgeStore';
+import { useHouseholdStore, MemberInfo } from '../store/householdStore';
+import { useAuthStore } from '../store/authStore';
 import { daysLeft, getExpiryStyle, dayLabel, urgency } from '../lib/expiry';
 import { isOpenable, getOpenedDays } from '../lib/openedShelfLife';
 import { FridgeItem } from '../types';
@@ -173,6 +175,7 @@ function Bubble({
   onUsed, onTrashed,
   trashZone, usedZone,
   onDragStart, onDragMove, onDragEnd, onLongPress,
+  memberInitials, memberColor,
 }: {
   item: FridgeItem;
   size: number;
@@ -186,6 +189,8 @@ function Bubble({
   onDragMove: (overTrash: boolean, overUsed: boolean) => void;
   onDragEnd: () => void;
   onLongPress: () => void;
+  memberInitials?: string;
+  memberColor?: string;
 }) {
   const days = daysLeft(item.expiry_date);
   const style = getExpiryStyle(days);
@@ -318,6 +323,15 @@ function Bubble({
           transform: [{ rotate: '-20deg' }],
         }}
       />
+      {/* Member initials badge — only shown in household mode */}
+      {memberInitials && memberColor && (
+        <View
+          pointerEvents="none"
+          style={[styles.memberBadge, { backgroundColor: memberColor }]}
+        >
+          <Text style={styles.memberBadgeText}>{memberInitials}</Text>
+        </View>
+      )}
       <Text style={styles.bubbleIcon}>{item.icon}</Text>
       <Text style={[styles.bubbleName, { color: style.text }]} numberOfLines={1}>{item.name}</Text>
       <Text style={[styles.bubbleDays, { color: style.text }]}>{dayLabel(days)}</Text>
@@ -331,44 +345,60 @@ type UndoToast = { item: FridgeItem; action: 'used' | 'trashed' } | null;
 
 export default function FridgeScreen({ navigation }: any) {
   const { items, fetchItems, setStatus, restoreItem, updateItem } = useFridgeStore();
+  const { members, fetchHousehold } = useHouseholdStore();
+  const { session } = useAuthStore();
+  const [filterUserId, setFilterUserId] = useState<string | null>(null);
 
-  useFocusEffect(useCallback(() => { fetchItems(); }, []));
+  useFocusEffect(useCallback(() => { fetchItems(); fetchHousehold(); }, []));
 
-  // Stable reference — only recomputes when the store's items array changes
-  const activeItems = useMemo(
+  // memberMap: user_id → MemberInfo (only populated when in a household)
+  const memberMap = useMemo(() => {
+    const m: Record<string, MemberInfo> = {};
+    members.forEach(mb => { m[mb.userId] = mb; });
+    return m;
+  }, [members]);
+
+  // All active items — used for mood/counts so they always reflect the full fridge
+  const allActiveItems = useMemo(
     () => items.filter(i => i.status === 'active'),
     [items],
   );
 
-  // Four categories matching the legend — expired <0, use today =0, expiring 1-3, use soon 4-6, fresh 7+
+  // Display items — filtered by member chip if one is selected
+  const activeItems = useMemo(
+    () => filterUserId ? allActiveItems.filter(i => i.user_id === filterUserId) : allActiveItems,
+    [allActiveItems, filterUserId],
+  );
+
+  // Four categories matching the legend — always based on full fridge (not filtered)
   const expiredCount   = useMemo(
-    () => activeItems.filter(i => daysLeft(i.expiry_date) < 0).length,
-    [activeItems],
+    () => allActiveItems.filter(i => daysLeft(i.expiry_date) < 0).length,
+    [allActiveItems],
   );
   const useTodayCount  = useMemo(
-    () => activeItems.filter(i => daysLeft(i.expiry_date) === 0).length,
-    [activeItems],
+    () => allActiveItems.filter(i => daysLeft(i.expiry_date) === 0).length,
+    [allActiveItems],
   );
   const expiringCount  = useMemo(
-    () => activeItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 1 && d <= 3; }).length,
-    [activeItems],
+    () => allActiveItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 1 && d <= 3; }).length,
+    [allActiveItems],
   );
   const useSoonCount   = useMemo(
-    () => activeItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 4 && d <= 6; }).length,
-    [activeItems],
+    () => allActiveItems.filter(i => { const d = daysLeft(i.expiry_date); return d >= 4 && d <= 6; }).length,
+    [allActiveItems],
   );
 
   // Resting scale: +1=happy1 (all fresh), 0=neutral (any 1-6d), -3=sad3 (any expired/today)
   const restingScale = useMemo(() => {
-    const days = activeItems.map(i => daysLeft(i.expiry_date));
+    const days = allActiveItems.map(i => daysLeft(i.expiry_date));
     const expiredN  = days.filter(d => d <= 0).length;
     const expiringN = days.filter(d => d >= 1 && d <= 6).length;
     return expiredN > 0 ? -3 : expiringN > 0 ? 0 : 1;
-  }, [activeItems]);
+  }, [allActiveItems]);
 
-  // Status badge — shows all urgent categories as separate segments to prevent mid-item line breaks
+  // Status badge — shows all urgent categories as separate segments (always full fridge)
   const thoughtBubble = useMemo(() => {
-    if (activeItems.length === 0) return null;
+    if (allActiveItems.length === 0) return null;
     const segments: Array<{ text: string; color: string }> = [];
     if (expiredCount  > 0) segments.push({ text: `${expiredCount} expired 🔴`,   color: '#E57373' });
     if (useTodayCount > 0) segments.push({ text: `${useTodayCount} use today 🔴`, color: '#E57373' });
@@ -380,7 +410,7 @@ export default function FridgeScreen({ navigation }: any) {
       return { segments, borderColor };
     }
     return { segments: [{ text: 'All fresh! 🟢', color: '#1D9E75' }], borderColor: '#1D9E75' };
-  }, [activeItems.length, expiredCount, useTodayCount, expiringCount, useSoonCount]);
+  }, [allActiveItems.length, expiredCount, useTodayCount, expiringCount, useSoonCount]);
 
   // Measured by onLayout so bubbles always fill the actual rendered canvas
   const [canvasDims, setCanvasDims] = useState({ w: CANVAS_W, h: 380 });
@@ -588,6 +618,36 @@ export default function FridgeScreen({ navigation }: any) {
         </Animated.View>
       </View>
 
+      {/* Member filter chips — only shown when in a household with multiple members */}
+      {members.length > 1 && (
+        <View style={styles.memberFilterRow}>
+          <TouchableOpacity
+            onPress={() => setFilterUserId(null)}
+            style={[styles.memberChip, filterUserId === null && styles.memberChipActiveAll]}
+          >
+            <Text style={[styles.memberChipText, filterUserId === null && { color: '#fff' }]}>All</Text>
+          </TouchableOpacity>
+          {members.map(m => (
+            <TouchableOpacity
+              key={m.userId}
+              onPress={() => setFilterUserId(filterUserId === m.userId ? null : m.userId)}
+              style={[
+                styles.memberChip,
+                { borderColor: m.color },
+                filterUserId === m.userId && { backgroundColor: m.color },
+              ]}
+            >
+              <Text style={[
+                styles.memberChipText,
+                { color: filterUserId === m.userId ? '#fff' : m.color },
+              ]}>
+                {m.initials}{m.userId === session?.user?.id ? ' ·me' : ''}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* Canvas wrapper — elevated above drop zones while a bubble is being dragged */}
       <View style={[styles.canvasWrapper, draggingId ? styles.canvasWrapperDragging : null]}>
         {/* Bubble canvas — snow globe effect */}
@@ -629,6 +689,8 @@ export default function FridgeScreen({ navigation }: any) {
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
                     onLongPress={() => setOpenModal(item)}
+                    memberInitials={memberMap[item.user_id]?.initials}
+                    memberColor={memberMap[item.user_id]?.color}
                   />
                 </Animated.View>
               );
@@ -878,6 +940,33 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+  },
+  memberBadge: {
+    position: 'absolute',
+    top: 3, right: 3,
+    width: 17, height: 17, borderRadius: 8.5,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.9)',
+  },
+  memberBadgeText: {
+    color: '#fff', fontSize: 6.5, fontWeight: '700', lineHeight: 8,
+  },
+  memberFilterRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 6,
+    flexWrap: 'wrap',
+  },
+  memberChip: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 20, borderWidth: 1.5, borderColor: '#ddd',
+    backgroundColor: 'transparent',
+  },
+  memberChipActiveAll: {
+    backgroundColor: '#111', borderColor: '#111',
+  },
+  memberChipText: {
+    fontSize: 11, fontWeight: '600', color: '#888',
   },
   bubbleIcon: { fontSize: 20 },
   bubbleName: { fontSize: 9, fontWeight: '500', textAlign: 'center', maxWidth: '90%' },

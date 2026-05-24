@@ -15,7 +15,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   loading: true,
 
-  setSession: (session) => set({ session, loading: false }),
+  setSession: (session) => {
+    set({ session, loading: false });
+    // Upsert profile so household members can read our email for initials
+    if (session?.user) {
+      supabase.from('profiles').upsert({
+        user_id: session.user.id,
+        email: session.user.email,
+      }).then();
+    }
+  },
 
   signIn: async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
