@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   Alert, Share, ActivityIndicator, ScrollView,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useHouseholdStore } from '../store/householdStore';
 import { useAuthStore } from '../store/authStore';
 
 export default function HouseholdScreen() {
-  const { members, householdId, householdName, createHousehold, createInvite, leaveHousehold, acceptInvite } = useHouseholdStore();
+  const { members, householdId, householdName, createHousehold, createInvite, leaveHousehold, acceptInvite, fetchHousehold } = useHouseholdStore();
   const { session } = useAuthStore();
   const myUserId = session?.user?.id;
 
@@ -16,15 +17,22 @@ export default function HouseholdScreen() {
   const [joinToken, setJoinToken] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useFocusEffect(useCallback(() => { fetchHousehold(); }, []));
+
   const inHousehold = !!householdId;
 
   const handleCreate = async () => {
     if (!hhName.trim()) return;
     setLoading(true);
-    const err = await createHousehold(hhName.trim());
-    setLoading(false);
-    if (err) Alert.alert('Error', err);
-    else setHhName('');
+    try {
+      const err = await createHousehold(hhName.trim());
+      if (err) Alert.alert('Error', err);
+      else setHhName('');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInvite = async () => {

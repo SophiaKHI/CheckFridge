@@ -49,9 +49,13 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
   householdName: null,
 
   fetchHousehold: async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { set({ members: [], householdId: null, householdName: null }); return; }
+
     const { data: myMembership } = await supabase
       .from('household_members')
       .select('household_id')
+      .eq('user_id', user.id)
       .maybeSingle();
 
     if (!myMembership) {
