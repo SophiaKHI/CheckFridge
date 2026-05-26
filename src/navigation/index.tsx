@@ -15,6 +15,7 @@ import HistoryScreen from '../screens/HistoryScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import HouseholdScreen from '../screens/HouseholdScreen';
 import AddItemScreen from '../screens/AddItemScreen';
+import EditItemScreen from '../screens/EditItemScreen';
 import ScanFridgeScreen from '../screens/ScanFridgeScreen';
 
 const Tab = createBottomTabNavigator();
@@ -36,6 +37,7 @@ function FridgeStack() {
     <Stack.Navigator>
       <Stack.Screen name="FridgeHome" component={FridgeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="AddItem" component={AddItemScreen} options={{ title: 'Add item', headerBackTitle: 'Fridge' }} />
+      <Stack.Screen name="EditItem" component={EditItemScreen} options={{ title: 'Edit item', headerBackTitle: 'Fridge' }} />
       <Stack.Screen name="ScanFridge" component={ScanFridgeScreen} options={{ title: 'Scan fridge', headerBackTitle: 'Fridge' }} />
     </Stack.Navigator>
   );

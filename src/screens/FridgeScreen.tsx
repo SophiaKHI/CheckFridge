@@ -11,6 +11,7 @@ import { useAuthStore } from '../store/authStore';
 import { daysLeft, getExpiryStyle, dayLabel, urgency } from '../lib/expiry';
 import { isOpenable, getOpenedDays } from '../lib/openedShelfLife';
 import { FridgeItem } from '../types';
+import * as Haptics from 'expo-haptics';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CANVAS_W = SCREEN_W - 32;
@@ -237,15 +238,14 @@ function Bubble({
       wasLongPressRef.current = false;
       setIsDragging(true);
       onDragStart(item.id);
-      if (openable) {
-        longPressTimer.current = setTimeout(() => {
-          wasLongPressRef.current = true;
-          setIsDragging(false);
-          onDragEnd();
-          pan.setValue({ x: 0, y: 0 });
-          onLongPressRef.current();
-        }, LONG_PRESS_DELAY);
-      }
+      longPressTimer.current = setTimeout(() => {
+        wasLongPressRef.current = true;
+        setIsDragging(false);
+        onDragEnd();
+        pan.setValue({ x: 0, y: 0 });
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        onLongPressRef.current();
+      }, LONG_PRESS_DELAY);
     },
     onPanResponderMove: (_, g) => {
       // Cancel long press if the finger has moved significantly
@@ -826,13 +826,23 @@ export default function FridgeScreen({ navigation }: any) {
                         </>
                       )}
 
-                      <TouchableOpacity
-                        style={[styles.modalDoneBtn, od == null && { marginTop: 20 }]}
-                        onPress={() => setOpenModal(null)}
-                        hitSlop={{ top: 8, bottom: 8, left: 24, right: 24 }}
-                      >
-                        <Text style={styles.modalDoneBtnText}>Done</Text>
-                      </TouchableOpacity>
+                      <View style={[styles.modalFooterRow, od == null && { marginTop: 20 }]}>
+                        <TouchableOpacity
+                          style={styles.modalFooterBtn}
+                          onPress={() => {
+                            setOpenModal(null);
+                            navigation.navigate('EditItem', { item: openModal });
+                          }}
+                        >
+                          <Text style={styles.modalFooterBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.modalFooterBtn}
+                          onPress={() => setOpenModal(null)}
+                        >
+                          <Text style={styles.modalFooterBtnText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
                     </>
                   );
                 })()}
@@ -1025,6 +1035,10 @@ const styles = StyleSheet.create({
     width: '100%', alignItems: 'center', marginBottom: 10,
   },
   modalBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  modalDoneBtn: { alignItems: 'center', paddingVertical: 6 },
-  modalDoneBtnText: { fontSize: 14, color: '#aaa', fontWeight: '500' },
+  modalFooterRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  modalFooterBtn: {
+    flex: 1, borderWidth: 1.5, borderColor: '#1D9E75', borderRadius: 12,
+    paddingVertical: 12, alignItems: 'center',
+  },
+  modalFooterBtnText: { fontSize: 15, color: '#1D9E75', fontWeight: '600' },
 });
