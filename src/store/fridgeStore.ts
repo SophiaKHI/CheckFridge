@@ -130,12 +130,11 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       return;
     }
 
-    // Re-insert into local state, sorted by expiry_date
+    // Re-insert into local state, deduping in case fetchItems already added it
     const restored: FridgeItem = { ...item, status: 'active' };
     set(state => ({
-      items: [...state.items, restored].sort((a, b) =>
-        a.expiry_date.localeCompare(b.expiry_date)
-      ),
+      items: [...state.items.filter(i => i.id !== restored.id), restored]
+        .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date)),
     }));
   },
 
@@ -172,8 +171,7 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
               set(state => ({ items: state.items.filter(i => i.id !== item.id) }));
             } else {
               set(state => ({
-                items: state.items
-                  .map(i => i.id === item.id ? item : i)
+                items: [...state.items.filter(i => i.id !== item.id), item]
                   .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date)),
               }));
             }
