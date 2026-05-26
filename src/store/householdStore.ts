@@ -49,14 +49,20 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
   householdName: null,
 
   fetchHousehold: async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { set({ members: [], householdId: null, householdName: null }); return; }
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) {
+      console.log('[fetchHousehold] no user:', userErr?.message);
+      set({ members: [], householdId: null, householdName: null });
+      return;
+    }
 
-    const { data: myMembership } = await supabase
+    const { data: myMembership, error: memErr } = await supabase
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    if (memErr) console.log('[fetchHousehold] membership error:', memErr.message);
 
     if (!myMembership) {
       set({ members: [], householdId: null, householdName: null });
@@ -65,7 +71,7 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
 
     const householdId = myMembership.household_id as string;
 
-    const [{ data: household }, { data: memberRows }] = await Promise.all([
+    const [{ data: household, error: hhErr }, { data: memberRows, error: mrErr }] = await Promise.all([
       supabase.from('households').select('name').eq('id', householdId).single(),
       supabase
         .from('household_members')
@@ -73,6 +79,9 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
         .eq('household_id', householdId)
         .order('joined_at', { ascending: true }),
     ]);
+
+    if (hhErr) console.log('[fetchHousehold] household error:', hhErr.message);
+    if (mrErr) console.log('[fetchHousehold] members error:', mrErr.message);
 
     if (!memberRows || memberRows.length === 0) {
       set({ members: [], householdId, householdName: household?.name ?? null });
@@ -111,12 +120,14 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
       .select('id')
       .single();
 
+    console.log('[createHousehold] households insert:', household?.id ?? null, hErr?.message ?? 'ok');
     if (hErr || !household) return hErr?.message ?? 'Failed to create household';
 
     const { error: mErr } = await supabase
       .from('household_members')
       .insert({ household_id: household.id, user_id: user.id, role: 'owner' });
 
+    console.log('[createHousehold] household_members insert:', mErr?.message ?? 'ok');
     if (mErr) return mErr.message;
 
     await get().fetchHousehold();
