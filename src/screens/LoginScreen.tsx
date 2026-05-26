@@ -34,17 +34,19 @@ export default function LoginScreen() {
         <Text style={styles.title}>CheckFridge</Text>
         <Text style={styles.subtitle}>Track what's in your fridge</Text>
 
+        <Text style={styles.label}>Email</Text>
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="you@example.com"
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
         />
+        <Text style={styles.label}>Password</Text>
         <TextInput
           style={styles.input}
-          placeholder="Password"
+          placeholder="••••••••"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
@@ -75,6 +77,7 @@ const styles = StyleSheet.create({
   logo: { fontSize: 56, textAlign: 'center', marginBottom: 8 },
   title: { fontSize: 28, fontWeight: '600', textAlign: 'center', color: '#111' },
   subtitle: { fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 40 },
+  label: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 6 },
   input: {
     borderWidth: 1, borderColor: '#e5e5e5', borderRadius: 12,
     padding: 14, fontSize: 15, marginBottom: 12, backgroundColor: '#fafafa',
