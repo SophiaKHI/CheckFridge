@@ -344,12 +344,17 @@ function Bubble({
 type UndoToast = { item: FridgeItem; action: 'used' | 'trashed' } | null;
 
 export default function FridgeScreen({ navigation }: any) {
-  const { items, fetchItems, setStatus, restoreItem, updateItem } = useFridgeStore();
+  const { items, fetchItems, setStatus, restoreItem, updateItem, subscribeRealtime, unsubscribeRealtime } = useFridgeStore();
   const { members, fetchHousehold } = useHouseholdStore();
   const { session } = useAuthStore();
   const [filterUserId, setFilterUserId] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => { fetchItems(); fetchHousehold(); }, []));
+
+  useEffect(() => {
+    subscribeRealtime();
+    return () => unsubscribeRealtime();
+  }, []);
 
   // memberMap: user_id → MemberInfo (only populated when in a household)
   const memberMap = useMemo(() => {

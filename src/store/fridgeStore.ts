@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { FridgeItem, FridgeItemDraft, ItemStatus } from '../types';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+
+let _channel: RealtimeChannel | null = null;
 
 interface FridgeState {
   items: FridgeItem[];
@@ -15,6 +18,8 @@ interface FridgeState {
   setStatus: (id: string, status: ItemStatus) => Promise<void>;
   restoreItem: (item: FridgeItem) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
+  subscribeRealtime: () => void;
+  unsubscribeRealtime: () => void;
 }
 
 export const useFridgeStore = create<FridgeState>((set, get) => ({
@@ -137,5 +142,51 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
   deleteItem: async (id) => {
     await supabase.from('fridge_items').delete().eq('id', id);
     set(state => ({ items: state.items.filter(item => item.id !== id) }));
+  },
+
+  subscribeRealtime: () => {
+    if (_channel) { supabase.removeChannel(_channel); _channel = null; }
+
+    _channel = supabase
+      .channel('fridge_items_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fridge_items' },
+        (payload) => {
+          const { removing } = get();
+
+          if (payload.eventType === 'INSERT') {
+            const item = payload.new as FridgeItem;
+            if (item.status !== 'active' || removing.has(item.id)) return;
+            set(state => {
+              if (state.items.find(i => i.id === item.id)) return state;
+              return {
+                items: [...state.items, item].sort((a, b) =>
+                  a.expiry_date.localeCompare(b.expiry_date)
+                ),
+              };
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const item = payload.new as FridgeItem;
+            if (item.status !== 'active' || removing.has(item.id)) {
+              set(state => ({ items: state.items.filter(i => i.id !== item.id) }));
+            } else {
+              set(state => ({
+                items: state.items
+                  .map(i => i.id === item.id ? item : i)
+                  .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date)),
+              }));
+            }
+          } else if (payload.eventType === 'DELETE') {
+            const id = (payload.old as Partial<FridgeItem>).id;
+            if (id) set(state => ({ items: state.items.filter(i => i.id !== id) }));
+          }
+        }
+      )
+      .subscribe();
+  },
+
+  unsubscribeRealtime: () => {
+    if (_channel) { supabase.removeChannel(_channel); _channel = null; }
   },
 }));
