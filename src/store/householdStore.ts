@@ -56,13 +56,16 @@ export const useHouseholdStore = create<HouseholdState>((set, get) => ({
       return;
     }
 
-    const { data: myMembership, error: memErr } = await supabase
+    const { data: memberships, error: memErr } = await supabase
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.id)
-      .maybeSingle();
+      .order('joined_at', { ascending: false })
+      .limit(1);
 
     if (memErr) console.log('[fetchHousehold] membership error:', memErr.message);
+
+    const myMembership = memberships?.[0] ?? null;
 
     if (!myMembership) {
       set({ members: [], householdId: null, householdName: null });
