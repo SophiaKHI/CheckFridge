@@ -69,60 +69,58 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       .from('fridge_items')
       .update(updates)
       .eq('id', id)
-      .select()
-      .single();
+      .select();
 
     if (error) {
       console.error('[FridgeStore] updateItem error:', error.message);
-    } else if (data) {
+    } else if (data?.[0]) {
       set(state => ({
-        items: state.items.map(item => item.id === id ? data : item),
+        items: state.items.map(item => item.id === id ? data[0] : item),
       }));
     }
   },
 
   setStatus: async (id, status) => {
-    // 1. Optimistic remove — happens instantly so the bubble vanishes immediately
+    // 1. Optimistic remove — instant
     set(state => ({
       items: state.items.filter(item => item.id !== id),
       removing: new Set([...state.removing, id]),
     }));
 
-    // 2. Short delay before the DB write — gives UNDO a clean cancellation window.
-    //    restoreItem() removes the id from `removing`, so the check below aborts.
-    await new Promise(r => setTimeout(r, 600));
-    if (!get().removing.has(id)) return; // UNDO was called — skip the write
-
-    // 3. Write to Supabase (only `status` — status_changed_at needs a migration first)
+    // 2. Write to DB immediately — no delay, so the change survives an app reload.
+    //    Undo is handled by restoreItem(), which writes 'active' back to the DB.
     const { error } = await supabase
       .from('fridge_items')
-      .update({ status })
+      .update({ status, status_changed_at: new Date().toISOString() })
       .eq('id', id);
 
     if (error) {
       console.error('[FridgeStore] setStatus error:', error.message);
     }
 
-    // 4. Release lock
-    set(state => {
-      const removing = new Set(state.removing);
-      removing.delete(id);
-      return { removing };
-    });
+    // 3. Hold id in `removing` for the full 5s undo window so delayed realtime
+    //    events (reconnect snapshots, late echoes) can't re-add this item.
+    //    restoreItem() clears it immediately when undo is pressed.
+    setTimeout(() => {
+      set(state => {
+        const removing = new Set(state.removing);
+        removing.delete(id);
+        return { removing };
+      });
+    }, 5000);
   },
 
   restoreItem: async (item: FridgeItem) => {
-    // Remove from `removing` first — this cancels any pending setStatus DB write
+    // Clear from `removing` first so realtime treats this item as active again
     set(state => {
       const removing = new Set(state.removing);
       removing.delete(item.id);
       return { removing };
     });
 
-    // Update DB back to active (handles the case where 600ms already passed)
     const { error } = await supabase
       .from('fridge_items')
-      .update({ status: 'active' })
+      .update({ status: 'active', status_changed_at: null })
       .eq('id', item.id);
 
     if (error) {
@@ -130,7 +128,6 @@ export const useFridgeStore = create<FridgeState>((set, get) => ({
       return;
     }
 
-    // Re-insert into local state, deduping in case fetchItems already added it
     const restored: FridgeItem = { ...item, status: 'active' };
     set(state => ({
       items: [...state.items.filter(i => i.id !== restored.id), restored]

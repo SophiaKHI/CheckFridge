@@ -86,7 +86,7 @@ function getSpoilageTip(name: string): string {
 // ─── Bubble layout ────────────────────────────────────────────────────────────
 
 const BUBBLE_PAD    = 6;
-const BUBBLE_BASE   = 75;
+const BUBBLE_BASE   = 82;  // increased from 75 to accommodate quantity controls
 const BUBBLE_VAR    = 4;   // ±2px from base — nearly uniform sizes
 const CANVAS_MARGIN = 6;   // keeps bubbles inset from edge so float animation never clips
 
@@ -176,6 +176,7 @@ function Bubble({
   onUsed, onTrashed,
   trashZone, usedZone,
   onDragStart, onDragMove, onDragEnd, onLongPress,
+  onDecrement, onIncrement,
   memberInitials, memberColor,
 }: {
   item: FridgeItem;
@@ -190,6 +191,8 @@ function Bubble({
   onDragMove: (overTrash: boolean, overUsed: boolean) => void;
   onDragEnd: () => void;
   onLongPress: () => void;
+  onDecrement: () => void;
+  onIncrement: () => void;
   memberInitials?: string;
   memberColor?: string;
 }) {
@@ -201,7 +204,13 @@ function Bubble({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasLongPressRef = useRef(false);
   const onLongPressRef = useRef(onLongPress);
+  const onDecrementRef = useRef(onDecrement);
+  const onIncrementRef = useRef(onIncrement);
+  const sizeRef = useRef(size);
   useEffect(() => { onLongPressRef.current = onLongPress; }, [onLongPress]);
+  useEffect(() => { onDecrementRef.current = onDecrement; }, [onDecrement]);
+  useEffect(() => { onIncrementRef.current = onIncrement; }, [onIncrement]);
+  useEffect(() => { sizeRef.current = size; }, [size]);
 
   // Gentle floating animation — each bubble starts at a different phase
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -233,7 +242,11 @@ function Bubble({
   });
 
   const panResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponder: (event) => {
+      // Bottom 20px of the bubble is reserved for quantity +/- controls.
+      // Returning false lets the touch fall through to the TouchableOpacity children.
+      return event.nativeEvent.locationY <= sizeRef.current - 20;
+    },
     onPanResponderGrant: () => {
       wasLongPressRef.current = false;
       setIsDragging(true);
@@ -285,6 +298,7 @@ function Bubble({
         {
           width: size, height: size, borderRadius: size / 2,
           backgroundColor: style.bg, borderColor: style.border,
+          paddingBottom: 18, // shifts centered content up, leaves room for qty row
           shadowOpacity: isDragging ? 0.22 : 0.1,
           elevation: isDragging ? 10 : 3,
         },
@@ -335,6 +349,23 @@ function Bubble({
       <Text style={styles.bubbleIcon}>{item.icon}</Text>
       <Text style={[styles.bubbleName, { color: style.text }]} numberOfLines={1}>{item.name}</Text>
       <Text style={[styles.bubbleDays, { color: style.text }]}>{dayLabel(days)}</Text>
+
+      {/* Quantity controls — absolute bottom strip, PanResponder releases this zone */}
+      <View style={styles.bubbleQtyRow} pointerEvents="box-none">
+        <TouchableOpacity
+          onPress={() => onDecrementRef.current()}
+          hitSlop={{ top: 6, bottom: 4, left: 10, right: 6 }}
+        >
+          <Text style={[styles.bubbleQtyBtn, { color: style.text }]}>−</Text>
+        </TouchableOpacity>
+        <Text style={[styles.bubbleQtyNum, { color: style.text }]}>{item.quantity ?? 1}</Text>
+        <TouchableOpacity
+          onPress={() => onIncrementRef.current()}
+          hitSlop={{ top: 6, bottom: 4, left: 6, right: 10 }}
+        >
+          <Text style={[styles.bubbleQtyBtn, { color: style.text }]}>+</Text>
+        </TouchableOpacity>
+      </View>
     </Animated.View>
   );
 }
@@ -567,6 +598,25 @@ export default function FridgeScreen({ navigation }: any) {
     playIggo('sad');
   }, [items, setStatus, showUndoToast, playIggo]);
 
+  const handleDecrement = useCallback((id: string) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    const qty = item.quantity ?? 1;
+    if (qty > 1) {
+      updateItem(id, { quantity: qty - 1 });
+    } else {
+      // Last one — route to used or trashed depending on expiry
+      if (daysLeft(item.expiry_date) < 0) handleTrashed(id);
+      else handleUsed(id);
+    }
+  }, [items, updateItem, handleUsed, handleTrashed]);
+
+  const handleIncrement = useCallback((id: string) => {
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    updateItem(id, { quantity: (item.quantity ?? 1) + 1 });
+  }, [items, updateItem]);
+
   const trashBg    = trashAnim.interpolate({ inputRange: [0, 1], outputRange: ['#FFF0F0', '#FFBDBD'] });
   const trashScale = trashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
   const usedBg     = usedAnim.interpolate({ inputRange: [0, 1], outputRange: ['#F0FDF9', '#A8EFD4'] });
@@ -694,6 +744,8 @@ export default function FridgeScreen({ navigation }: any) {
                     onDragMove={handleDragMove}
                     onDragEnd={handleDragEnd}
                     onLongPress={() => setOpenModal(item)}
+                    onDecrement={() => handleDecrement(item.id)}
+                    onIncrement={() => handleIncrement(item.id)}
                     memberInitials={memberMap[item.user_id]?.initials}
                     memberColor={memberMap[item.user_id]?.color}
                   />
@@ -986,6 +1038,15 @@ const styles = StyleSheet.create({
   bubbleIcon: { fontSize: 20 },
   bubbleName: { fontSize: 9, fontWeight: '500', textAlign: 'center', maxWidth: '90%' },
   bubbleDays: { fontSize: 8, opacity: 0.85 },
+  bubbleQtyRow: {
+    position: 'absolute',
+    bottom: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  bubbleQtyBtn: { fontSize: 11, fontWeight: '700', opacity: 0.6, lineHeight: 13 },
+  bubbleQtyNum: { fontSize: 9, fontWeight: '700', opacity: 0.6, minWidth: 10, textAlign: 'center' },
   emptyText: { textAlign: 'center', marginTop: 100, color: '#aaa', fontSize: 15, lineHeight: 24 },
   dropRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   dropTarget: { height: 80, borderRadius: 14, overflow: 'hidden' },

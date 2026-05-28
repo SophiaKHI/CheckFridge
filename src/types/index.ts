@@ -9,12 +9,14 @@ export interface FridgeItem {
   added_at: string;
   status: ItemStatus;
   status_changed_at: string | null;
+  quantity: number;
 }
 
 export interface FridgeItemDraft {
   name: string;
   icon: string;
   expiry_date: string;
+  quantity?: number;
 }
 
 export type ExpiryBand = 'expired' | 'today' | 'soon' | 'fresh';

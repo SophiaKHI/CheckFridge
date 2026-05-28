@@ -20,6 +20,7 @@ const DEFAULT_SHELF_DAYS = 7;
 export default function AddItemScreen({ navigation }: any) {
   const [name, setName]               = useState('');
   const [icon, setIcon]               = useState('🥦');
+  const [quantity, setQuantity]       = useState(1);
   const [shelfDays, setShelfDays]     = useState(DEFAULT_SHELF_DAYS);
   const [purchaseDate, setPurchaseDate] = useState(new Date());
   const [isOpened, setIsOpened]       = useState(false);
@@ -57,7 +58,7 @@ export default function AddItemScreen({ navigation }: any) {
   const handleAdd = async () => {
     if (!name.trim()) { Alert.alert('Please enter an item name'); return; }
     setLoading(true);
-    await addItem({ name: name.trim(), icon, expiry_date: format(expiryDate, 'yyyy-MM-dd') });
+    await addItem({ name: name.trim(), icon, expiry_date: format(expiryDate, 'yyyy-MM-dd'), quantity });
     setLoading(false);
     navigation.goBack();
   };
@@ -110,6 +111,23 @@ export default function AddItemScreen({ navigation }: any) {
         onChangeText={setIcon}
         maxLength={2}
       />
+
+      <Text style={styles.sectionTitle}>Quantity</Text>
+      <View style={styles.stepper}>
+        <TouchableOpacity
+          style={styles.stepBtn}
+          onPress={() => setQuantity(q => Math.max(1, q - 1))}
+        >
+          <Text style={styles.stepBtnText}>−</Text>
+        </TouchableOpacity>
+        <Text style={styles.stepValue}>{quantity}</Text>
+        <TouchableOpacity
+          style={styles.stepBtn}
+          onPress={() => setQuantity(q => q + 1)}
+        >
+          <Text style={styles.stepBtnText}>+</Text>
+        </TouchableOpacity>
+      </View>
 
       {openedDays != null && (
         <>
@@ -200,6 +218,23 @@ const styles = StyleSheet.create({
   sealedChipText: { fontSize: 14, color: '#555' },
   sealedChipTextActive: { color: '#1D9E75', fontWeight: '600' },
   openedChipTextActive: { color: '#B45309', fontWeight: '600' },
+  stepper: {
+    flexDirection: 'row', alignItems: 'center', gap: 0,
+    backgroundColor: '#fafafa', borderRadius: 12,
+    borderWidth: 1, borderColor: '#e5e5e5',
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+  },
+  stepBtn: {
+    paddingHorizontal: 22, paddingVertical: 12,
+    backgroundColor: '#f0f0f0',
+  },
+  stepBtnText: { fontSize: 20, color: '#333', fontWeight: '400', lineHeight: 22 },
+  stepValue: {
+    fontSize: 17, fontWeight: '600', color: '#111',
+    paddingHorizontal: 24, paddingVertical: 12,
+    minWidth: 60, textAlign: 'center',
+  },
   addBtn: {
     backgroundColor: '#1D9E75', borderRadius: 14, padding: 16,
     alignItems: 'center', marginTop: 28,

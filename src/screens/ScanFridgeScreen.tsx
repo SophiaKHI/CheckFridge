@@ -21,6 +21,7 @@ interface DetectedItem {
   icon: string;
   expiryDays: number;
   purchaseDaysAgo: number;
+  quantity: number;
   /** true when expiryDays is estimated, not from reference data — renders a ~ prefix */
   isEstimate?: boolean;
   /** Set for pantry/shelf-stable items — shown as a small label above the purchase chips */
@@ -183,6 +184,7 @@ Rules:
           icon: i.icon ?? '🍽️',
           expiryDays,
           purchaseDaysAgo: 0,
+          quantity: 1,
           isEstimate,
           storageNote: pantry ? '🏠 Store outside fridge' : undefined,
           openedDays,
@@ -213,7 +215,7 @@ Rules:
         item.isOpened && item.openedDays != null
           ? format(addDays(new Date(), item.openedDays), 'yyyy-MM-dd')
           : format(addDays(new Date(), item.expiryDays - item.purchaseDaysAgo), 'yyyy-MM-dd');
-      await addItem({ name: item.name, icon: item.icon, expiry_date: expiryDate });
+      await addItem({ name: item.name, icon: item.icon, expiry_date: expiryDate, quantity: item.quantity });
     }
     await fetchItems(); // sync store before navigating back
     setAdding(false);
@@ -287,6 +289,21 @@ Rules:
                 value={item.name}
                 onChangeText={v => updateItem(index, { name: v })}
               />
+              <View style={styles.scanQtyStepper}>
+                <TouchableOpacity
+                  onPress={() => updateItem(index, { quantity: Math.max(1, item.quantity - 1) })}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+                >
+                  <Text style={styles.scanQtyBtn}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.scanQtyNum}>{item.quantity}</Text>
+                <TouchableOpacity
+                  onPress={() => updateItem(index, { quantity: item.quantity + 1 })}
+                  hitSlop={{ top: 6, bottom: 6, left: 4, right: 6 }}
+                >
+                  <Text style={styles.scanQtyBtn}>+</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity onPress={() => removeItem(index)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Text style={styles.removeBtn}>✕</Text>
               </TouchableOpacity>
@@ -417,6 +434,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, backgroundColor: '#fff',
   },
   removeBtn: { fontSize: 16, color: '#ccc', paddingHorizontal: 2 },
+  scanQtyStepper: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#f0f0f0', borderRadius: 8,
+    paddingHorizontal: 6, paddingVertical: 4,
+  },
+  scanQtyBtn: { fontSize: 14, fontWeight: '600', color: '#555', lineHeight: 16 },
+  scanQtyNum: { fontSize: 12, fontWeight: '700', color: '#333', minWidth: 14, textAlign: 'center' },
   expiryRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   expiryChip: {
     backgroundColor: '#efefef', borderRadius: 14,
