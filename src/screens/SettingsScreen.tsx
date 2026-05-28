@@ -3,26 +3,66 @@ import {
   View, Text, StyleSheet, Switch, TouchableOpacity, Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import { useAuthStore } from '../store/authStore';
 import { useHouseholdStore } from '../store/householdStore';
-import * as Notifications from 'expo-notifications';
+import { supabase } from '../lib/supabase';
 
 export default function SettingsScreen({ navigation }: any) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const { signOut, session } = useAuthStore();
   const { householdName, members, fetchHousehold } = useHouseholdStore();
 
-  useFocusEffect(useCallback(() => { fetchHousehold(); }, []));
+  const checkNotificationStatus = useCallback(async () => {
+    if (!session?.user?.id) return;
+    const { data } = await supabase
+      .from('profiles')
+      .select('push_token')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+    setNotificationsEnabled(!!data?.push_token);
+  }, [session?.user?.id]);
+
+  useFocusEffect(useCallback(() => {
+    fetchHousehold();
+    checkNotificationStatus();
+  }, [checkNotificationStatus]));
 
   const toggleNotifications = async (value: boolean) => {
+    if (!session?.user?.id) return;
+
     if (value) {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
+      if (!Device.isDevice) {
+        Alert.alert('Not supported', 'Push notifications only work on a physical device.');
+        return;
+      }
+      const { status: existing } = await Notifications.getPermissionsAsync();
+      let finalStatus = existing;
+      if (existing !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      if (finalStatus !== 'granted') {
         Alert.alert('Permission required', 'Enable notifications in your device settings to get expiry reminders.');
         return;
       }
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+      });
+      await supabase
+        .from('profiles')
+        .update({ push_token: tokenData.data })
+        .eq('user_id', session.user.id);
+      setNotificationsEnabled(true);
+    } else {
+      await supabase
+        .from('profiles')
+        .update({ push_token: null })
+        .eq('user_id', session.user.id);
+      setNotificationsEnabled(false);
     }
-    setNotificationsEnabled(value);
   };
 
   const handleSignOut = () => {
